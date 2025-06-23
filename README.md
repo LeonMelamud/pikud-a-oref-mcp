@@ -84,14 +84,8 @@ For **Claude Desktop**, add to `~/Library/Application Support/Claude/claude_desk
 {
   "mcpServers": {
     "poha-alerts": {
-      "command": "python",
-      "args": ["-m", "src.core.mcp_server"],
-      "cwd": "/path/to/poha-real-time-alert-system",
-      "env": {
-        "PYTHONPATH": "/path/to/poha-real-time-alert-system",
-        "WEBHOOK_URL": "http://localhost:8000/api/webhook/alerts",
-        "API_KEY": "poha-test-key-2024-secure"
-      }
+      "type": "http",
+      "url": "http://127.0.0.1:8001/mcp"
     }
   }
 }
@@ -102,20 +96,24 @@ For **Claude Desktop**, add to `~/Library/Application Support/Claude/claude_desk
 {
   "mcpServers": {
     "poha-alerts": {
-      "command": "python",
-      "args": ["-m", "src.core.mcp_server"],
-      "cwd": "/Users/Leon.Melamud/Documents/Cline/MCP/poha-real-time-alert-system",
-      "env": {
-        "PYTHONPATH": "/Users/Leon.Melamud/Documents/Cline/MCP/poha-real-time-alert-system",
-        "WEBHOOK_URL": "http://localhost:8000/api/webhook/alerts",
-        "API_KEY": "poha-test-key-2024-secure"
-      }
+      "type": "http", 
+      "url": "http://127.0.0.1:8001/mcp"
     }
   }
 }
 ```
 
-3. **Start using** - The server will be available as "Pikud Haoref Alert System" in your MCP client.
+3. **Start the services:**
+```bash
+# Start all services (FastAPI + MCP server)
+make up
+
+# Or start individually
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000  # FastAPI
+python -m src.core.mcp_server  # MCP Server
+```
+
+4. **Start using** - The server will be available as "Pikud Haoref Alert System" in your MCP client via HTTP transport.
 
 ## API Endpoints (FastAPI Service)
 
