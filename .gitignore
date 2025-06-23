@@ -71,6 +71,8 @@ dist/
 
 # Package files
 *.vsix
+# Exception: Allow VSCode extension package
+!vscode-extension/*.vsix
 
 # Environment variables
 .env.local

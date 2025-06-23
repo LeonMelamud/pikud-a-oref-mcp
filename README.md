@@ -19,7 +19,6 @@ The **FastAPI service** polls the official Pikud Haoref API at `https://www.oref
 - **Single-source polling** of emergency alerts (eliminates duplicate API calls)
 - **Real-time SSE streaming** via public webhook endpoint
 - **API key authentication** for client endpoints and **geo-restriction** to Israel
-- **Rate limiting** (5 requests per minute per IP)
 - **Docker support** for easy deployment
 - **Comprehensive testing** suite
 
@@ -57,12 +56,14 @@ GEOIP_DB_PATH=/path/to/GeoLite2-Country.mmdb  # Optional for geo-restriction
 
 3. **Run the service:**
 ```bash
-# Development
-uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+# Start all 3 services with Docker (API:8000, MCP:8001, SSE:8002)
+make up
 
-# Production with Docker
-docker build -t poha-alert-system .
-docker run -d -p 8000:8000 -e API_KEY=your-key --name poha-container poha-alert-system
+# View logs in real-time
+make logs
+
+# Check status
+make status
 ```
 
 4. **Connect to the stream:**
@@ -105,13 +106,20 @@ For **Claude Desktop**, add to `~/Library/Application Support/Claude/claude_desk
 
 3. **Start the services:**
 ```bash
-# Start all services (FastAPI + MCP server)
+# Start all 3 services (FastAPI:8000 + MCP:8001 + SSE Gateway:8002)
 make up
 
-# Or start individually
-python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000  # FastAPI
-python -m src.core.mcp_server  # MCP Server
+# Alternative: Individual service management
+make app-restart    # Restart just FastAPI
+make mcp-restart    # Restart just MCP server  
+make logs-app       # View FastAPI logs only
+make logs-mcp       # View MCP server logs only
 ```
+
+**Access URLs after startup:**
+- FastAPI + Swagger UI: http://localhost:8000/docs
+- MCP Server: http://localhost:8001/mcp  
+- SSE Gateway: http://localhost:8002
 
 4. **Start using** - The server will be available as "Pikud Haoref Alert System" in your MCP client via HTTP transport.
 
@@ -147,7 +155,7 @@ data: {"id": "12345", "data": ["Tel Aviv", "Ramat Gan"], "cat": "1", "title": "R
 Use the check_current_alerts tool to see if there are any active emergency alerts from the subscribed SSE stream.
 ```
 
-### Get Alert History
+### Get Alert History MCP
 ```
 Use get_alert_history with limit=5 to get the 5 most recent alerts from the API.
 Use get_alert_history with region="Tel Aviv" to get alerts for a specific region.
@@ -206,43 +214,68 @@ Configure `GEOIP_DB_PATH` to restrict access to Israeli IP addresses only:
 2. Download `GeoLite2-Country.mmdb`
 3. Set `GEOIP_DB_PATH` in your `.env` file
 
-### Rate Limiting
-- **Limit:** 5 requests per minute per IP address
-- **Response:** HTTP 429 when exceeded
 
 ## Development
 
 ### Project Structure
 ```
-├── main.py              # FastAPI application entry point
-├── mcp_server.py        # MCP server implementation
-├── polling.py           # Core API polling logic
-├── sse.py              # Server-Sent Events implementation
-├── security.py         # Authentication and geo-restriction
-├── alert_queue.py      # Alert queue management
-├── state.py            # Application state management
-├── geolocation.py      # Geo-IP functionality
-├── conftest.py         # Test configuration
-├── pytest.ini         # Test settings
-├── tests/              # Comprehensive test suite
-├── diagram.py          # Architecture diagram generator
-├── mcp.json           # MCP server configuration
-├── Dockerfile         # Docker configuration
-├── .gitignore         # Git ignore rules
-└── requirements.txt   # Python dependencies
+poha-real-time-alert-system/
+├── src/                     # Main source code
+│   ├── core/               # Core MCP functionality
+│   │   ├── mcp_server.py   # MCP server implementation
+│   │   ├── state.py        # Application state management
+│   │   └── alert_queue.py  # Alert queue management
+│   ├── api/                # FastAPI services
+│   │   ├── main.py         # FastAPI application entry point
+│   │   └── sse_gateway.py  # SSE gateway for VSCode extension
+│   ├── services/           # Business logic
+│   │   ├── polling.py      # Core API polling logic
+│   │   └── sse.py          # Server-Sent Events implementation
+│   └── utils/              # Utilities
+│       ├── security.py     # Authentication and geo-restriction
+│       └── geolocation.py  # Geo-IP functionality
+├── docker/                 # Docker configuration
+│   ├── Dockerfile         # Main FastAPI container
+│   ├── mcp.Dockerfile     # MCP server container
+│   └── docker-compose.yml # Multi-service setup
+├── scripts/               # Utility scripts
+│   ├── start_mcp.sh       # MCP server startup script
+│   └── diagram.py         # Architecture diagram generator
+├── tests/                 # Comprehensive test suite
+├── vscode-extension/      # VSCode extension for alerts
+├── conftest.py           # Test configuration
+├── pytest.ini           # Test settings
+├── Makefile             # Docker management commands
+├── requirements.txt     # Python dependencies
+├── README.md           # This file
+└── .gitignore         # Git ignore rules
 ```
 
 ### Testing
 ```bash
-# Run all tests
+# Run tests in Docker
+make test
+
+# Or run tests locally (requires Python setup)
 pytest
-
-# Run specific test file
 pytest tests/test_api.py -v
-
-# Run with coverage
 pytest --cov=. tests/
 ```
+
+### Local Development (Alternative to Docker)
+If you prefer to develop without Docker:
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Start services individually (3 separate terminals)
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload  # Terminal 1
+python -m src.core.mcp_server                                            # Terminal 2  
+python -m uvicorn src.api.sse_gateway:app --host 0.0.0.0 --port 8002     # Terminal 3
+```
+
+**Recommended:** Use Docker with `make up` for easier development.
 
 ### Dependencies
 - **Core:** `fastapi`, `uvicorn`, `httpx`, `python-dotenv`
@@ -252,21 +285,49 @@ pytest --cov=. tests/
 
 ## Docker Deployment
 
-### Build Image
+### Services Overview
+The system runs **3 Docker containers** with the following ports:
+
+| Service | Container | Port | Description |
+|---------|-----------|------|-------------|
+| **FastAPI** | `poha-app` | `8000` | Main API service, alert polling, SSE webhooks |
+| **MCP Server** | `poha-mcp-server` | `8001` | Model Context Protocol server for AI assistants |
+| **SSE Gateway** | `poha-sse-gateway` | `8002` | SSE gateway for VSCode extension |
+
+**Access URLs:**
+- **FastAPI Swagger**: http://localhost:8000/docs
+- **MCP Endpoint**: http://localhost:8001/mcp
+- **SSE Gateway**: http://localhost:8002
+
+### Quick Start with Make
 ```bash
-docker build -t poha-alert-system .
+# Start all 3 services (FastAPI + MCP + SSE Gateway)
+make up
+
+# View logs from all services
+make logs
+
+# Check status and ports
+make status
+
+# Stop all services
+make down
+
+# Restart with rebuild
+make restart
 ```
 
-### Run Container
+### Manual Docker Commands (Alternative)
 ```bash
-# Basic run
-docker run -d -p 8000:8000 -e API_KEY=your-key poha-alert-system
+# Build and run with docker-compose (all 3 services)
+cd docker
+docker-compose up -d
 
-# With environment file
-docker run -d -p 8000:8000 --env-file .env poha-alert-system
-
-# With geo-restriction
-docker run -d -p 8000:8000 --env-file .env -v /path/to/GeoLite2-Country.mmdb:/app/geo.mmdb poha-alert-system
+# Or individual containers
+docker build -f docker/Dockerfile -t poha-api .
+docker build -f docker/mcp.Dockerfile -t poha-mcp .
+docker run -d -p 8000:8000 -e API_KEY=your-key poha-api
+docker run -d -p 8001:8001 -e API_KEY=your-key poha-mcp
 ```
 
 ## Data Source
@@ -298,42 +359,6 @@ API_KEY=poha-test-key-2024-secure
 GEOIP_DB_PATH=/path/to/GeoLite2-Country.mmdb
 ```
 
-### MCP Configuration for Various Clients
-
-**Claude Desktop:**
-```json
-{
-  "mcpServers": {
-    "poha-alerts": {
-      "command": "python",
-      "args": ["-m", "src.core.mcp_server"],
-      "cwd": "/path/to/poha-real-time-alert-system",
-      "env": {
-        "WEBHOOK_URL": "http://localhost:8000/api/webhook/alerts",
-        "API_KEY": "poha-test-key-2024-secure"
-      }
-    }
-  }
-}
-```
-
-**Generic MCP Client:**
-```json
-{
-  "mcpServers": {
-    "poha-alerts": {
-      "command": "python",
-      "args": ["-m", "src.core.mcp_server"],
-      "cwd": "/path/to/poha-real-time-alert-system",
-      "env": {
-        "PYTHONPATH": "/path/to/poha-real-time-alert-system",
-        "WEBHOOK_URL": "http://localhost:8000/api/webhook/alerts",
-        "API_KEY": "poha-test-key-2024-secure"
-      }
-    }
-  }
-}
-```
 
 ## Troubleshooting
 

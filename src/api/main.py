@@ -4,8 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 from dotenv import load_dotenv
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
+# Rate limiting imports disabled (not needed for emergency alerts)
+# from slowapi.errors import RateLimitExceeded  
+# from slowapi.middleware import SlowAPIMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -147,21 +148,11 @@ app = FastAPI(
 # Add the Geo-IP middleware to the application
 app.middleware("http")(geo_ip_middleware)
 
-# Add the Rate Limiter middleware
-app.state.limiter = limiter
-def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
-    """
-    Handles the exception when a rate limit is exceeded.
-
-    This function is registered as an exception handler for RateLimitExceeded
-    and returns a JSON response with a 429 status code.
-    """
-    return JSONResponse(
-        status_code=429,
-        content={"detail": "Too many requests", "error": f"Rate limit exceeded: {exc.detail}"}
-    )
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
+# Rate limiting disabled for emergency alert system
+# Emergency alerts require immediate access during critical situations
+# app.state.limiter = limiter
+# app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# app.add_middleware(SlowAPIMiddleware)
 
 @app.get("/", summary="Service Status")
 async def root():
@@ -172,7 +163,7 @@ async def root():
     return {"message": "Welcome to the Pikud Haoref Real-Time Alert Service"}
 
 @app.get("/api/alerts-stream", summary="Real-Time Alert Stream")
-@limiter.limit("5/minute")  # Apply a rate limit of 5 requests per minute per IP
+# Note: No rate limiting for emergency alerts - people need immediate access during emergencies
 async def alerts_stream(request: Request, api_key: str = Depends(get_api_key)):
     """
     Establishes a Server-Sent Events (SSE) connection with the client.
@@ -194,7 +185,7 @@ async def alerts_webhook(request: Request, api_key: str = Depends(get_api_key)):
     return StreamingResponse(alert_event_generator(request), media_type="text/event-stream")
 
 @app.post("/api/test/fake-alert", summary="Create Fake Alert for Testing", response_model=AlertResponse)
-@limiter.limit("5/minute")
+# Note: No rate limiting on test endpoint for easier development and testing
 async def create_fake_alert(request: Request, fake_alert: FakeAlert, api_key: str = Depends(get_api_key)):
     """
     Creates a fake alert for testing the webhook and MCP integration with Hebrew/English descriptions.
