@@ -1,0 +1,98 @@
+{
+  "name": "pikud-haoref-alerts",
+  "displayName": "Pikud Haoref Emergency Alerts MCP",
+  "description": "Real-time Israeli emergency alerts in VS Code",
+  "version": "1.0.0",
+  "publisher": "leon-melamud",
+  "author": "Leon Melamud",
+  "icon": "Pakar.png",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:pikudHaorefAlerts"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "pikudHaoref.startAlerts",
+        "title": "Start Listening for Alerts",
+        "category": "Pikud Haoref"
+      },
+      {
+        "command": "pikudHaoref.stopAlerts",
+        "title": "Stop Listening for Alerts",
+        "category": "Pikud Haoref"
+      },
+      {
+        "command": "pikudHaoref.testAlert",
+        "title": "Send Test Alert",
+        "category": "Pikud Haoref"
+      },
+      {
+        "command": "pikudHaoref.deleteAlert",
+        "title": "Delete Alert",
+        "icon": {
+          "light": "./resources/light/delete.svg",
+          "dark": "./resources/dark/delete.svg"
+        }
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "pikudHaorefAlerts",
+          "name": "🚨 Emergency Alerts",
+          "icon": "$(broadcast)"
+        }
+      ]
+    },
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "pikudHaoref.deleteAlert",
+          "when": "view == pikudHaorefAlerts && viewItem == alertItem",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Pikud Haoref Alerts",
+      "properties": {
+        "pikudHaoref.apiUrl": {
+          "type": "string",
+          "default": "http://localhost:8002/api/alerts-stream",
+          "description": "SSE endpoint URL"
+        },
+        "pikudHaoref.apiKey": {
+          "type": "string",
+          "default": "poha-test-key-2024-secure",
+          "description": "API key for authentication"
+        },
+        "pikudHaoref.enableNotifications": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable desktop notifications for incoming alerts."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "deploy": "vsce publish --yarn"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.89.0",
+    "@types/node": "16.x",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "eventsource": "^2.0.2"
+  }
+}

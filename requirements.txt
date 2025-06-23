@@ -1,0 +1,18 @@
+fastapi[standard]
+uvicorn
+httpx
+diagrams
+geoip2[async]
+python-dotenv
+slowapi
+
+# Testing Dependencies
+pytest
+pytest-asyncio
+respx
+pytest-xprocess
+
+# MCP Dependencies
+fastmcp
+fuzzywuzzy
+python-Levenshtein 
