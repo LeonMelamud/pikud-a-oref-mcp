@@ -9,6 +9,7 @@ interface Alert {
     id: string;
     type: string;
     cities: string[];
+    city_ids: number[];
     instructions: string;
     received_at: string;
 }
@@ -128,34 +129,35 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
     private static readonly HEARTBEAT_CHECK_INTERVAL = 10000; // check every 10s
     private static readonly HEARTBEAT_TIMEOUT = 45000; // no data for 45s = dead
     private extensionPath: string = '';
-    private knownCities: Set<string> = new Set();
+    private knownCities: Map<number, string> = new Map();
 
     constructor() {
         // Don't auto-start here; activate() calls startListening()
     }
 
-    /** Get all unique cities seen across all alerts */
-    getKnownCities(): string[] {
-        return [...this.knownCities].sort();
+    /** Get all unique cities seen across all alerts as {id, name}[] */
+    getKnownCities(): { id: number; name: string }[] {
+        return [...this.knownCities.entries()]
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name));
     }
 
     /** Track cities from an alert */
-    private trackCities(cities: string[]) {
-        for (const city of cities) {
-            this.knownCities.add(city);
+    private trackCities(cities: string[], cityIds: number[]) {
+        for (let i = 0; i < cities.length; i++) {
+            if (cityIds[i] !== undefined) {
+                this.knownCities.set(cityIds[i], cities[i]);
+            }
         }
     }
 
     /** Check if an alert matches the area filter (empty filter = match all) */
     private matchesAreaFilter(alert: Alert): boolean {
         const config = vscode.workspace.getConfiguration('pikudHaoref');
-        const filterAreas = config.get<string[]>('filterAreas', []);
-        if (filterAreas.length === 0) { return true; }
-        // Only check if the alert city contains the filter area as substring.
-        // NOT the reverse — that causes false positives (e.g. city "אזור" matching filter "אזור תעשייה בראון")
-        return alert.cities.some(city =>
-            filterAreas.some(area => city.includes(area))
-        );
+        const filterIds = config.get<number[]>('filterAreas', []);
+        if (filterIds.length === 0) { return true; }
+        const filterSet = new Set(filterIds);
+        return alert.city_ids.some(id => filterSet.has(id));
     }
 
     setExtensionPath(extPath: string) {
@@ -265,26 +267,27 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
             children.push(soundPicker);
 
             // Filter header
-            const filterAreas = config.get<string[]>('filterAreas', []);
+            const filterIds = config.get<number[]>('filterAreas', []);
             const filterHeader = new AlertItem(
                 '📍 Area Filter',
-                filterAreas.length > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None
+                filterIds.length > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None
             );
             filterHeader.kind = 'filterHeader';
             filterHeader.id = 'ctrl-filter-header';
-            filterHeader.description = filterAreas.length === 0 ? 'All areas (click to set)' : `${filterAreas.length} areas`;
+            filterHeader.description = filterIds.length === 0 ? 'All areas (click to set)' : `${filterIds.length} areas`;
             filterHeader.contextValue = 'filterHeader';
             filterHeader.command = { command: 'pikudHaoref.selectFilterAreas', title: 'Edit Filter' };
             filterHeader.tooltip = 'Click to select which areas trigger alerts';
-            if (filterAreas.length > 0) {
-                filterHeader.children = filterAreas.map(area => {
-                    const areaItem = new AlertItem(area, vscode.TreeItemCollapsibleState.None);
+            if (filterIds.length > 0) {
+                filterHeader.children = filterIds.map(id => {
+                    const name = this.knownCities.get(id) || `City #${id}`;
+                    const areaItem = new AlertItem(name, vscode.TreeItemCollapsibleState.None);
                     areaItem.kind = 'filterArea';
-                    areaItem.id = `ctrl-filter-${area}`;
-                    areaItem.areaName = area;
+                    areaItem.id = `ctrl-filter-${id}`;
+                    areaItem.areaName = String(id);
                     areaItem.contextValue = 'filterArea';
                     areaItem.iconPath = new vscode.ThemeIcon('location');
-                    areaItem.tooltip = `Click × to remove ${area} from filter`;
+                    areaItem.tooltip = `Click × to remove ${name} from filter`;
                     return areaItem;
                 });
             }
@@ -395,12 +398,13 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
                         id: alertData.id,
                         type: this.resolveType(alertData),
                         cities: alertData.cities || alertData.data || [],
+                        city_ids: alertData.city_ids || [],
                         instructions: alertData.instructions_en || alertData.instructions || alertData.title || 'Follow safety instructions',
                         received_at: new Date().toISOString()
                     };
 
                     // Track all cities we've ever seen
-                    this.trackCities(alert.cities);
+                    this.trackCities(alert.cities, alert.city_ids);
 
                     // Add to beginning of array (most recent first)
                     this.alerts.unshift(alert);
@@ -557,11 +561,13 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
             for (const row of body.alerts) {
                 if (existingIds.has(row.id)) { continue; }
                 const cities = row.data || [];
-                this.trackCities(cities);
+                const cityIds = row.city_ids || [];
+                this.trackCities(cities, cityIds);
                 this.alerts.push({
                     id: row.id,
                     type: this.resolveType(row),
                     cities,
+                    city_ids: cityIds,
                     instructions: row.title || row.desc || 'Follow safety instructions',
                     received_at: row.timestamp || new Date().toISOString(),
                 });
@@ -720,39 +726,48 @@ export function activate(context: vscode.ExtensionContext) {
         }),
         vscode.commands.registerCommand('pikudHaoref.removeFilterArea', async (item: AlertItem) => {
             if (!item.areaName) { return; }
+            const idToRemove = parseInt(item.areaName, 10);
             const config = vscode.workspace.getConfiguration('pikudHaoref');
-            const current = config.get<string[]>('filterAreas', []);
-            const updated = current.filter(a => a !== item.areaName);
+            const current = config.get<number[]>('filterAreas', []);
+            const updated = current.filter(id => id !== idToRemove);
             await config.update('filterAreas', updated, vscode.ConfigurationTarget.Global);
             alertProvider.refresh();
-            vscode.window.showInformationMessage(`📍 Removed "${item.areaName}" from filter`);
+            const name = alertProvider.getKnownCities().find(c => c.id === idToRemove)?.name || `City #${idToRemove}`;
+            vscode.window.showInformationMessage(`📍 Removed "${name}" from filter`);
         }),
         vscode.commands.registerCommand('pikudHaoref.selectFilterAreas', async () => {
             const config = vscode.workspace.getConfiguration('pikudHaoref');
-            const currentFilter = config.get<string[]>('filterAreas', []);
-            const allCities = alertProvider.getKnownCities();
+            const currentFilter = config.get<number[]>('filterAreas', []);
+            const currentFilterSet = new Set(currentFilter);
 
-            // Merge known cities (from ALL alerts, not just filtered) + current filter
-            const allOptions = [...new Set([...allCities, ...currentFilter])].sort();
-
-            if (allOptions.length === 0) {
-                // No history yet — allow manual entry
-                const input = await vscode.window.showInputBox({
-                    prompt: 'Enter area names separated by commas (no alerts received yet to pick from)',
-                    placeHolder: 'e.g. תל אביב, רמת גן, חיפה'
-                });
-                if (input) {
-                    const areas = input.split(',').map(s => s.trim()).filter(Boolean);
-                    await config.update('filterAreas', areas, vscode.ConfigurationTarget.Global);
-                    alertProvider.refresh();
-                    vscode.window.showInformationMessage(`📍 Area filter set: ${areas.join(', ')}`);
+            // Fetch full city list from API for reliable ID mapping
+            let allCities: { id: number; name: string }[] = [];
+            try {
+                const serverUrl = config.get<string>('serverUrl', 'http://localhost:8000');
+                const apiKey = config.get<string>('apiKey', 'poha-test-key-2024-secure');
+                const url = `${serverUrl.replace(/\/+$/, '')}/api/cities`;
+                const response = await fetch(url, { headers: { 'X-API-Key': apiKey } });
+                if (response.ok) {
+                    const body = await response.json() as { cities: { id: number; name: string }[] };
+                    allCities = body.cities || [];
                 }
+            } catch { /* fall through to local cache */ }
+
+            // Fallback: use locally known cities if API unreachable
+            if (allCities.length === 0) {
+                allCities = alertProvider.getKnownCities();
+            }
+
+            if (allCities.length === 0) {
+                vscode.window.showWarningMessage('No cities available yet. Wait for alerts or check server connection.');
                 return;
             }
 
-            const items = allOptions.map(city => ({
-                label: city,
-                picked: currentFilter.includes(city)
+            const items = allCities.map(c => ({
+                label: c.name,
+                description: `ID: ${c.id}`,
+                picked: currentFilterSet.has(c.id),
+                cityId: c.id
             }));
 
             const picked = await vscode.window.showQuickPick(items, {
@@ -762,13 +777,14 @@ export function activate(context: vscode.ExtensionContext) {
             });
 
             if (picked !== undefined) {
-                const selectedAreas = picked.map(p => p.label);
-                await config.update('filterAreas', selectedAreas, vscode.ConfigurationTarget.Global);
+                const selectedIds = picked.map(p => p.cityId);
+                await config.update('filterAreas', selectedIds, vscode.ConfigurationTarget.Global);
                 alertProvider.refresh();
-                if (selectedAreas.length === 0) {
+                if (selectedIds.length === 0) {
                     vscode.window.showInformationMessage('📍 Area filter cleared — receiving all alerts');
                 } else {
-                    vscode.window.showInformationMessage(`📍 Area filter set: ${selectedAreas.join(', ')}`);
+                    const names = picked.map(p => p.label).join(', ');
+                    vscode.window.showInformationMessage(`📍 Area filter set: ${names}`);
                 }
             }
         }),

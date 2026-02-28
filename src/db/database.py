@@ -128,13 +128,15 @@ def _normalize_alert_row(r) -> Dict[str, Any]:
             raw = json.loads(r["raw_json"])
         except json.JSONDecodeError:
             pass
+    cities = json.loads(r["data_json"]) if r["data_json"] else raw.get("cities") or raw.get("data") or []
     return {
         "id": r["id"],
         "title": r["title"] or raw.get("title") or raw.get("instructions", ""),
         "category": r["category"] or raw.get("cat", ""),
         "desc": r["description"] or raw.get("desc") or raw.get("instructions", ""),
         "type": raw.get("type", ""),
-        "data": json.loads(r["data_json"]) if r["data_json"] else raw.get("cities") or raw.get("data") or [],
+        "data": cities,
+        "city_ids": [_city_cache.get(c) for c in cities if c in _city_cache],
         "timestamp": r["timestamp"],
     }
 
@@ -194,3 +196,16 @@ async def get_alert_stats() -> Dict[str, Any]:
     )
     top = [{"city": r["city"], "count": r["cnt"]} for r in await cur3.fetchall()]
     return {"total_alerts": total, "total_city_entries": total_cities, "top_cities": top}
+
+
+async def get_all_cities() -> List[Dict[str, Any]]:
+    """Return all known cities as [{id, name}, ...]."""
+    if not _db:
+        return []
+    cursor = await _db.execute("SELECT id, name FROM cities ORDER BY name")
+    return [{"id": r["id"], "name": r["name"]} for r in await cursor.fetchall()]
+
+
+def resolve_city_ids(city_names: List[str]) -> List[int]:
+    """Resolve a list of city names to IDs using the in-memory cache. Sync, no DB call."""
+    return [_city_cache[c] for c in city_names if c in _city_cache]

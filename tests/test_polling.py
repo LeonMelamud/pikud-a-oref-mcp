@@ -35,6 +35,7 @@ async def test_poll_for_alerts_new_alert_found_on_primary():
             "type": "missiles",
             "title": "Enter Shelters",
             "cities": ["Tel Aviv"],
+            "city_ids": [],
             "instructions": "Enter Shelters"
         }
         mock_queue.put.assert_called_with(expected_alert)

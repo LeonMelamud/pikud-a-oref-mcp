@@ -6,7 +6,7 @@ import logging
 from collections import defaultdict
 from ..core.alert_queue import alert_queue
 from ..core.state import app_state
-from ..db.database import save_alert
+from ..db.database import save_alert, resolve_city_ids
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +176,7 @@ async def poll_for_alerts():
                         "type": get_alert_type_by_category(alert_data.get("cat")),
                         "title": alert_data.get("title"),
                         "cities": cities,
+                        "city_ids": resolve_city_ids(cities),
                         "instructions": alert_data.get("title")
                     }
                     

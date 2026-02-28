@@ -137,9 +137,9 @@
         },
         "pikudHaoref.filterAreas": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": { "type": "number" },
           "default": [],
-          "description": "Filter alerts by area names. Only matching alerts trigger notifications and sound. Empty = all alerts."
+          "description": "Filter alerts by city IDs. Only matching alerts trigger notifications and sound. Empty = all alerts. Use the area filter picker to select cities."
         }
       }
     }

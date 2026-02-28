@@ -16,7 +16,7 @@ from ..utils.security import geo_ip_middleware, get_api_key, limiter
 from ..services.sse import alert_event_generator
 from ..core.state import app_state
 from ..core.alert_queue import alert_queue
-from ..db.database import init_db, close_db, save_alert, get_alerts_by_city, get_recent_alerts, get_alert_stats
+from ..db.database import init_db, close_db, save_alert, get_alerts_by_city, get_recent_alerts, get_alert_stats, get_all_cities
 
 # Load environment variables from .env file at the start
 load_dotenv()
@@ -351,3 +351,10 @@ async def alerts_stats():
     """Get aggregate statistics about stored alerts."""
     stats = await get_alert_stats()
     return stats
+
+
+@app.get("/api/cities", summary="All Known Cities")
+async def list_cities():
+    """Return all city names with their integer IDs for stable client-side filtering."""
+    cities = await get_all_cities()
+    return {"cities": cities, "count": len(cities)}
