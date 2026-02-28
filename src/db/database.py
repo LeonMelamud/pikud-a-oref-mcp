@@ -91,29 +91,38 @@ async def save_alert(alert: Dict[str, Any]):
     await _db.commit()
 
 
+def _normalize_alert_row(r) -> Dict[str, Any]:
+    """Build a normalized alert dict from a DB row, falling back to raw_json for missing fields."""
+    raw = {}
+    if r["raw_json"]:
+        try:
+            raw = json.loads(r["raw_json"])
+        except json.JSONDecodeError:
+            pass
+    return {
+        "id": r["id"],
+        "title": r["title"] or raw.get("title") or raw.get("instructions", ""),
+        "category": r["category"] or raw.get("cat", ""),
+        "desc": r["description"] or raw.get("desc") or raw.get("instructions", ""),
+        "type": raw.get("type", ""),
+        "data": json.loads(r["data_json"]) if r["data_json"] else raw.get("cities") or raw.get("data") or [],
+        "timestamp": r["timestamp"],
+    }
+
+
 async def get_alerts_by_city(city: str, limit: int = 50) -> List[Dict[str, Any]]:
     """Get alerts for a specific city."""
     if not _db:
         return []
     limit = min(limit, 100)
     cursor = await _db.execute(
-        "SELECT a.id, a.title, a.category, a.description, a.data_json, a.timestamp "
+        "SELECT a.id, a.title, a.category, a.description, a.data_json, a.raw_json, a.timestamp "
         "FROM city_alerts ca JOIN alerts a ON ca.alert_id = a.id AND ca.timestamp = a.timestamp "
         "WHERE ca.city = ? ORDER BY ca.timestamp DESC LIMIT ?",
         (city, limit),
     )
     rows = await cursor.fetchall()
-    return [
-        {
-            "id": r["id"],
-            "title": r["title"],
-            "category": r["category"],
-            "desc": r["description"],
-            "data": json.loads(r["data_json"]) if r["data_json"] else [],
-            "timestamp": r["timestamp"],
-        }
-        for r in rows
-    ]
+    return [_normalize_alert_row(r) for r in rows]
 
 
 async def get_recent_alerts(limit: int = 50, since: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -123,28 +132,18 @@ async def get_recent_alerts(limit: int = 50, since: Optional[str] = None) -> Lis
     limit = min(limit, 100)
     if since:
         cursor = await _db.execute(
-            "SELECT id, title, category, description, data_json, timestamp "
+            "SELECT id, title, category, description, data_json, raw_json, timestamp "
             "FROM alerts WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
             (since, limit),
         )
     else:
         cursor = await _db.execute(
-            "SELECT id, title, category, description, data_json, timestamp "
+            "SELECT id, title, category, description, data_json, raw_json, timestamp "
             "FROM alerts ORDER BY timestamp DESC LIMIT ?",
             (limit,),
         )
     rows = await cursor.fetchall()
-    return [
-        {
-            "id": r["id"],
-            "title": r["title"],
-            "category": r["category"],
-            "desc": r["description"],
-            "data": json.loads(r["data_json"]) if r["data_json"] else [],
-            "timestamp": r["timestamp"],
-        }
-        for r in rows
-    ]
+    return [_normalize_alert_row(r) for r in rows]
 
 
 async def get_alert_stats() -> Dict[str, Any]:
