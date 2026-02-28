@@ -576,12 +576,41 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
 
     /** Resolve human-readable type from various data shapes */
     private resolveType(data: any): string {
-        // Detect "all clear" / safe-to-exit alerts by title keywords
-        const title = (data.title || data.title_en || data.instructions || '').toLowerCase();
-        const allClearKeywords = ['all clear', 'safe to exit', 'ניתן לצאת', 'חזרה לשגרה', 'הותר'];
-        if (allClearKeywords.some(kw => title.includes(kw))) {
+        // Check all text fields for "all clear" indicators
+        // Real data from oref.org.il uses these exact phrases:
+        //   "ניתן לצאת מהמרחב המוגן אך יש להישאר בקרבתו"
+        //   "חדירת כלי טיס עוין - האירוע הסתיים"
+        const textFields = [
+            data.title, data.title_en, data.instructions, data.desc
+        ].filter(Boolean).join(' ');
+        const allClearKeywords = [
+            'ניתן לצאת',          // "ניתן לצאת מהמרחב המוגן..."
+            'האירוע הסתיים',      // "חדירת כלי טיס עוין - האירוע הסתיים"
+            'חזרה לשגרה',         // general all-clear
+            'all clear',
+            'safe to exit',
+        ];
+        if (allClearKeywords.some(kw => textFields.includes(kw))) {
             return 'allClear';
         }
+
+        // Map known Hebrew titles to types (as they arrive from SSE relay)
+        const hebrewTitleMap: Record<string, string> = {
+            'ירי רקטות וטילים': 'missiles',
+            'התרעת צבע אדום': 'missiles',
+            'חדירת כלי טיס עוין': 'hostileAircraftIntrusion',
+            'רעידת אדמה': 'earthQuake',
+            'צונאמי': 'tsunami',
+            'אירוע רדיולוגי': 'radiologicalEvent',
+            'חומרים מסוכנים': 'hazardousMaterials',
+            'חדירת מחבלים': 'terroristInfiltration',
+        };
+        for (const field of [data.title, data.instructions]) {
+            if (field && hebrewTitleMap[field]) {
+                return hebrewTitleMap[field];
+            }
+        }
+
         // SSE structured alert: has "type" like "missiles"
         if (data.type && ALERT_TYPE_LABELS[data.type]) {
             return data.type;
