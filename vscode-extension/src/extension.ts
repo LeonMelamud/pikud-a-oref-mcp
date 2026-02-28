@@ -193,13 +193,14 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
             controlsItem.id = 'controls-panel';
             items.push(controlsItem);
 
-            // --- Alerts ---
-            if (this.alerts.length === 0) {
+            // --- Alerts (filtered) ---
+            const filteredAlerts = this.alerts.filter(a => this.matchesAreaFilter(a));
+            if (filteredAlerts.length === 0) {
                 const empty = new AlertItem('📭 No alerts yet', vscode.TreeItemCollapsibleState.None);
                 empty.kind = 'empty';
                 items.push(empty);
             } else {
-                this.alerts.forEach((alert, index) => {
+                filteredAlerts.forEach((alert, index) => {
                     const alertItem = new AlertItem(
                         formatAlertLabel(alert),
                         vscode.TreeItemCollapsibleState.Collapsed
@@ -731,7 +732,7 @@ export function activate(context: vscode.ExtensionContext) {
             const currentFilter = config.get<string[]>('filterAreas', []);
             const allCities = alertProvider.getKnownCities();
 
-            // Merge known cities + current filter (in case filter has cities not yet seen)
+            // Merge known cities (from ALL alerts, not just filtered) + current filter
             const allOptions = [...new Set([...allCities, ...currentFilter])].sort();
 
             if (allOptions.length === 0) {
