@@ -27,8 +27,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # SSE Client Configuration
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "http://localhost:8000/api/webhook/alerts")
-API_KEY = os.getenv("API_KEY", "poha-test-key-2024-secure")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "http://localhost:8000/api/alerts-stream")
+API_KEY = os.getenv("API_KEY", "dev-secret-key")
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",") if os.getenv("ALLOWED_ORIGINS", "*") != "*" else ["*"]
 
 # Store connected SSE clients for broadcasting
 connected_clients: Set[asyncio.Queue] = set()
@@ -42,7 +43,8 @@ class AlertSubscriber:
         self.is_connected = False
         self.subscription_task = None
         self.reconnect_attempts = 0
-        self.max_reconnect_attempts = 5
+        self.max_reconnect_attempts = 50
+        self.reconnect_delay = 5
         
     async def subscribe(self):
         """Subscribe to SSE webhook and process events"""
@@ -85,7 +87,8 @@ class AlertSubscriber:
                 self.reconnect_attempts += 1
                 logger.error(f"SSE connection error (attempt {self.reconnect_attempts}): {e}")
                 if self.reconnect_attempts < self.max_reconnect_attempts:
-                    await asyncio.sleep(5)  # Wait 5 seconds before reconnecting
+                    delay = min(self.reconnect_delay * self.reconnect_attempts, 60)
+                    await asyncio.sleep(delay)
                 else:
                     logger.error("Max reconnection attempts reached. SSE client disabled.")
                     break
@@ -180,7 +183,7 @@ app = FastAPI(title="SSE Gateway for VSCode Extension", lifespan=lifespan)
 # Add CORS middleware for VSCode extension
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -205,9 +208,16 @@ async def root():
     """Root endpoint"""
     return {"message": "SSE Gateway for VSCode Extension", "status": "active"}
 
+@app.get("/health")
+async def health():
+    """Health check endpoint"""
+    return {"status": "ok"}
+
 if __name__ == "__main__":
+    port = int(os.getenv("PORT", os.getenv("SSE_PORT", "8002")))
     logger.info("🚀 Starting SSE Gateway Server for VSCode Extension")
     logger.info(f"🔗 Will connect to SSE webhook: {WEBHOOK_URL}")
+    logger.info(f"🌐 Listening on port: {port}")
     
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    uvicorn.run(app, host="0.0.0.0", port=port)

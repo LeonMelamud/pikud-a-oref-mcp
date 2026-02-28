@@ -5,6 +5,7 @@ diagrams
 geoip2[async]
 python-dotenv
 slowapi
+aiosqlite
 
 # Testing Dependencies
 pytest

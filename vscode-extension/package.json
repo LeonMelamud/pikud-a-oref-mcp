@@ -2,14 +2,16 @@
   "name": "pikud-haoref-alerts",
   "displayName": "Pikud Haoref Emergency Alerts MCP",
   "description": "Real-time Israeli emergency alerts in VS Code",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "leon-melamud",
   "author": "Leon Melamud",
   "icon": "Pakar.png",
   "engines": {
-    "vscode": "^1.74.0"
+    "vscode": "^1.89.0"
   },
-  "categories": ["Other"],
+  "categories": [
+    "Other"
+  ],
   "activationEvents": [
     "onStartupFinished",
     "onView:pikudHaorefAlerts"
@@ -39,14 +41,27 @@
           "light": "./resources/light/delete.svg",
           "dark": "./resources/dark/delete.svg"
         }
+      },
+      {
+        "command": "pikudHaoref.clearAllAlerts",
+        "title": "Clear All Alerts",
+        "category": "Pikud Haoref"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pikudHaoref",
+          "title": "Pikud Haoref Alerts",
+          "icon": "resources/siren.svg"
+        }
+      ]
+    },
     "views": {
-      "explorer": [
+      "pikudHaoref": [
         {
           "id": "pikudHaorefAlerts",
-          "name": "🚨 Emergency Alerts",
-          "icon": "$(broadcast)"
+          "name": "🚨 Emergency Alerts"
         }
       ]
     },
@@ -76,6 +91,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable desktop notifications for incoming alerts."
+        },
+        "pikudHaoref.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:8000",
+          "description": "Base URL of the Pikud Haoref FastAPI server (used for sending test alerts)"
         }
       }
     }
@@ -87,8 +107,8 @@
     "deploy": "vsce publish --yarn"
   },
   "devDependencies": {
+    "@types/node": "^18.19.130",
     "@types/vscode": "^1.89.0",
-    "@types/node": "16.x",
     "eslint": "^8.57.0",
     "typescript": "^5.4.5"
   },

@@ -14,9 +14,19 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # 5. Copy the application code into the container
 COPY . .
 
-# 6. Expose the port the app runs on
-EXPOSE 8000
+# 6. Create non-root user and data directory
+RUN useradd --create-home appuser && \
+    mkdir -p /app/data && chown -R appuser:appuser /app
+USER appuser
 
-# 7. Define the command to run the app
-# Note: We bind to 0.0.0.0 to make it accessible from outside the container
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"] 
+ENV PORT=8000
+
+# 7. Expose the port the app runs on
+EXPOSE ${PORT}
+
+# 8. Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request,os; urllib.request.urlopen(f'http://localhost:{os.getenv(\"PORT\",\"8000\")}/health')" || exit 1
+
+# 9. Define the command to run the app
+CMD uvicorn src.api.main:app --host 0.0.0.0 --port ${PORT}

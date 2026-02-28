@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 os.environ["API_KEY"] = "test-key"
 
 # Mock the infinite background tasks before importing main
-with patch('polling.poll_for_alerts', new=AsyncMock()):
-    from main import app
+with patch('src.services.polling.poll_for_alerts', new=AsyncMock()):
+    from src.api.main import app
 
 @pytest.fixture
 def client():
@@ -23,8 +23,8 @@ def test_root_endpoint(client):
     assert response.status_code == 200
     assert response.json() == {"message": "Welcome to the Pikud Haoref Real-Time Alert Service"}
 
-@patch('security.API_KEY', 'test-key')
-@patch('main.alert_event_generator')
+@patch('src.utils.security.API_KEY', 'test-key')
+@patch('src.api.main.alert_event_generator')
 def test_alerts_stream_requires_api_key(mock_generator, client):
     """
     Tests that the alerts stream endpoint returns a 401 Unauthorized
@@ -34,8 +34,8 @@ def test_alerts_stream_requires_api_key(mock_generator, client):
     assert response.status_code == 401
     assert "API key is missing" in response.text
 
-@patch('security.API_KEY', 'test-key')
-@patch('main.alert_event_generator')
+@patch('src.utils.security.API_KEY', 'test-key')
+@patch('src.api.main.alert_event_generator')
 def test_alerts_stream_with_invalid_api_key(mock_generator, client):
     """
     Tests that the alerts stream endpoint returns a 401 Unauthorized
@@ -46,8 +46,8 @@ def test_alerts_stream_with_invalid_api_key(mock_generator, client):
     assert response.status_code == 401
     assert "Invalid API key" in response.text
 
-@patch('security.API_KEY', 'test-key')
-@patch('main.alert_event_generator')
+@patch('src.utils.security.API_KEY', 'test-key')
+@patch('src.api.main.alert_event_generator')
 def test_alerts_stream_with_valid_api_key(mock_generator, client):
     """
     Tests that the alerts stream endpoint can be connected to with a valid API key.

@@ -348,6 +348,68 @@ docker run -d -p 8001:8001 -e API_KEY=your-key poha-mcp
 - **Mobile Apps** - Push notification services
 - **Smart Home Systems** - Automated responses to alerts
 
+## SQLite Persistence
+
+Alerts are persisted to a local SQLite database (via `aiosqlite`) for historical queries. The database is created automatically on startup.
+
+- **Default path:** `data/alerts.db` (configurable via `DATABASE_PATH` env var)
+- **Tables:** `alerts` (full alert data) + `city_alerts` (denormalized for fast city lookup)
+- **Indexed** on city name and timestamp for fast queries
+
+## REST API Endpoints
+
+In addition to the SSE streaming endpoints, the following REST endpoints are available:
+
+| Endpoint | Description |
+|---|---|
+| `GET /health` | Health check (returns `{"status": "ok"}`) |
+| `GET /api/alerts/current` | Current active alert state |
+| `GET /api/alerts/history?city=&limit=&since=` | Alert history from SQLite |
+| `GET /api/alerts/city/{city_name}` | Alerts for a specific city |
+| `GET /api/alerts/stats` | Aggregate alert statistics |
+
+**Examples:**
+```bash
+curl http://localhost:8000/health
+curl "http://localhost:8000/api/alerts/history?city=תל אביב&limit=10"
+curl http://localhost:8000/api/alerts/city/חיפה
+curl http://localhost:8000/api/alerts/stats
+```
+
+## Railway Deployment
+
+This project is configured for deployment on [Railway](https://railway.app/):
+
+1. Connect your GitHub repo to Railway
+2. Set environment variables: `API_KEY`, `DATABASE_PATH=data/alerts.db`, `PORT`
+3. Railway reads `railway.toml` for build config + health check (`/health`)
+4. The app binds to `$PORT` dynamically (Railway assigns the port)
+
+**Why Railway over Vercel?** SSE requires long-lived persistent connections. Vercel has a 10-60s function timeout which kills SSE streams.
+
+## OpenClaw Integration
+
+To use the Pikud HaOref MCP server with [OpenClaw](https://github.com/openclaw), add to your `openclaw.json`:
+
+```json
+{
+  "mcpServers": {
+    "pikud-haoref": {
+      "url": "http://127.0.0.1:8001/mcp"
+    }
+  }
+}
+```
+
+See [openclaw-config-example.json](openclaw-config-example.json) and [skills/pikud-haoref/SKILL.md](skills/pikud-haoref/SKILL.md) for full details.
+
+### Additional MCP Tools (SQLite-backed)
+
+| Tool | Description |
+|---|---|
+| `get_city_alerts(city, limit)` | Query local DB for alerts in a specific city |
+| `get_db_stats()` | Get alert database statistics |
+
 ## Configuration Examples
 
 ### FastAPI Service `.env` File

@@ -14,9 +14,19 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # 5. Copy the application code into the container
 COPY . .
 
-# 6. Expose the port the app runs on for the host machine
-EXPOSE 8001
+# 6. Create non-root user and data directory
+RUN useradd --create-home appuser && \
+    mkdir -p /app/data && chown -R appuser:appuser /app
+USER appuser
 
-# 7. Define the command to run the app
-# Add a startup delay to give the main app time to initialize
-CMD ["sh", "-c", "sleep 5 && python -m src.core.mcp_server"] 
+ENV PORT=8001
+
+# 7. Expose the port the app runs on for the host machine
+EXPOSE ${PORT}
+
+# 8. Health check (MCP server responds on /mcp)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request,os; urllib.request.urlopen(f'http://localhost:{os.getenv(\"PORT\",\"8001\")}/mcp')" || exit 1
+
+# 9. Define the command to run the app
+CMD ["python", "-m", "src.core.mcp_server"]

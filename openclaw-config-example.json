@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "pikud-haoref": {
+      "url": "http://127.0.0.1:8001/mcp",
+      "_comment": "For Railway deployment, replace with: https://<your-railway-domain>/mcp"
+    }
+  }
+}

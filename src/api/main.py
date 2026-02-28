@@ -16,6 +16,7 @@ from ..utils.security import geo_ip_middleware, get_api_key, limiter
 from ..services.sse import alert_event_generator
 from ..core.state import app_state
 from ..core.alert_queue import alert_queue
+from ..db.database import init_db, close_db, save_alert, get_alerts_by_city, get_recent_alerts, get_alert_stats
 
 # Load environment variables from .env file at the start
 load_dotenv()
@@ -130,11 +131,13 @@ async def lifespan(app: FastAPI):
     """
     Handles application startup and shutdown events.
     """
-    logger.info("Application startup: Initializing API poller background task.")
+    logger.info("Application startup: Initializing database and background tasks.")
+    await init_db()
     poll_task = asyncio.create_task(poll_for_alerts())
     yield
-    # Cleanup logic goes here if needed, e.g., poll_task.cancel()
     logger.info("Application shutdown: Cleaning up resources.")
+    poll_task.cancel()
+    await close_db()
 
 app = FastAPI(
     title="Pikud Haoref Real-Time Alert Service",
@@ -277,6 +280,14 @@ async def create_fake_alert(request: Request, fake_alert: FakeAlert, api_key: st
     # Add the fake alert to the queue for SSE broadcasting
     try:
         await alert_queue.put(alert_data)
+        # Also persist to SQLite so it appears in history/city queries
+        structured = {
+            "id": alert_id,
+            "type": category_info["type"],
+            "cities": fake_alert.data,
+            "instructions": category_info.get(f"instructions_{fake_alert.language}", ""),
+        }
+        await save_alert(structured)
         logger.info(f"Fake alert created: {alert_id} - {title} (Category: {fake_alert.cat}, Type: {category_info['type']})")
         
         return AlertResponse(
@@ -289,7 +300,54 @@ async def create_fake_alert(request: Request, fake_alert: FakeAlert, api_key: st
         logger.error(f"Failed to create fake alert: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create fake alert: {str(e)}")
 
-# To run this application from the project's root directory:
-# 1. Ensure you are in the 'MCP/poha-real-time-alert-system' directory.
-# 2. Install dependencies: pip install -r requirements.txt
-# 3. Run the server: uvicorn src.main:app --reload
+
+# --- REST API Endpoints (backed by SQLite) ---
+
+@app.get("/health", summary="Health Check")
+async def health_check():
+    """Returns service health status."""
+    return {"status": "ok", "version": "1.0.0"}
+
+
+@app.get("/api/alerts/current", summary="Current Active Alerts")
+async def get_current_alerts():
+    """Get the current active alert (if any) from the in-memory state."""
+    if app_state.last_alert_id:
+        return {"active": True, "last_alert_id": app_state.last_alert_id}
+    return {"active": False, "last_alert_id": None}
+
+
+@app.get("/api/alerts/history", summary="Alert History")
+async def get_alert_history(
+    city: Optional[str] = None,
+    limit: int = 50,
+    since: Optional[str] = None,
+):
+    """
+    Get alert history from the database.
+
+    - **city**: Filter by city name (Hebrew)
+    - **limit**: Max results (1-100, default 50)
+    - **since**: ISO timestamp to filter alerts after
+    """
+    limit = max(1, min(100, limit))
+    if city:
+        alerts = await get_alerts_by_city(city, limit)
+    else:
+        alerts = await get_recent_alerts(limit, since)
+    return {"alerts": alerts, "count": len(alerts)}
+
+
+@app.get("/api/alerts/city/{city_name}", summary="Alerts by City")
+async def get_city_alerts(city_name: str, limit: int = 50):
+    """Get alert history for a specific city."""
+    limit = max(1, min(100, limit))
+    alerts = await get_alerts_by_city(city_name, limit)
+    return {"city": city_name, "alerts": alerts, "count": len(alerts)}
+
+
+@app.get("/api/alerts/stats", summary="Alert Statistics")
+async def alerts_stats():
+    """Get aggregate statistics about stored alerts."""
+    stats = await get_alert_stats()
+    return stats

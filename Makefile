@@ -1,13 +1,14 @@
 # Pikud Haoref Real-Time Alert System - Docker Management
 # Usage: make <command>
 
-.PHONY: help build up down restart logs logs-app logs-mcp clean rebuild test status
+.PHONY: help build up down restart logs logs-poller logs-mcp logs-sse clean rebuild test status deploy
 
 # Default target
 help:
 	@echo "🚀 Pikud Haoref Alert System - Docker Commands"
 	@echo ""
 	@echo "📋 Available commands:"
+	@echo "  make deploy    - One-command deploy (build + start + verify)"
 	@echo "  make build     - Build all Docker containers"
 	@echo "  make up        - Start all services"
 	@echo "  make down      - Stop all services"
@@ -15,24 +16,25 @@ help:
 	@echo "  make rebuild   - Force rebuild all containers (no cache)"
 	@echo ""
 	@echo "📊 Monitoring:"
-	@echo "  make logs      - Show logs from all services"
-	@echo "  make logs-app  - Show logs from FastAPI app only"
-	@echo "  make logs-mcp  - Show logs from MCP server only"
-	@echo "  make status    - Show container status"
+	@echo "  make logs       - Show logs from all services"
+	@echo "  make logs-poller - Show alert-poller logs"
+	@echo "  make logs-mcp    - Show MCP tools logs"
+	@echo "  make logs-sse    - Show SSE relay logs"
+	@echo "  make status      - Show container status"
 	@echo ""
 	@echo "🧪 Testing:"
-	@echo "  make test      - Run test suite"
-	@echo "  make test-alert - Create a test Hebrew missile alert"
+	@echo "  make test        - Run test suite"
+	@echo "  make test-alert  - Create a test Hebrew missile alert"
 	@echo "  make test-alert-en - Create a test English earthquake alert"
 	@echo ""
 	@echo "🧹 Cleanup:"
 	@echo "  make clean     - Stop and remove POHA containers, networks, and volumes only"
 	@echo "  make clean-all - Stop and remove ALL Docker resources (use with caution)"
 	@echo ""
-	@echo "🌐 Access URLs:"
-	@echo "  FastAPI:      http://localhost:8000"
-	@echo "  Swagger UI:   http://localhost:8000/docs"
-	@echo "  MCP Server:   http://localhost:8001"
+	@echo "🌐 Services:"
+	@echo "  Alert Poller:  http://localhost:8000  (REST API + Swagger at /docs)"
+	@echo "  MCP Tools:     http://localhost:8001  (MCP streamable-http)"
+	@echo "  SSE Relay:     http://localhost:8002  (VS Code extension endpoint)"
 
 # Build containers
 build:
@@ -44,9 +46,9 @@ up:
 	@echo "🚀 Starting services..."
 	cd docker && docker-compose up -d
 	@echo "✅ Services started!"
-	@echo "📱 FastAPI: http://localhost:8000"
-	@echo "📱 Swagger: http://localhost:8000/docs"
-	@echo "📱 MCP Server: http://localhost:8001"
+	@echo "📱 Alert Poller: http://localhost:8000  (Swagger: /docs)"
+	@echo "📱 MCP Tools:    http://localhost:8001/mcp"
+	@echo "📱 SSE Relay:    http://localhost:8002/api/alerts-stream"
 
 # Stop services
 down:
@@ -72,14 +74,19 @@ logs:
 	cd docker && docker-compose logs -f
 
 # Show app logs only
-logs-app:
-	@echo "📋 Showing FastAPI app logs..."
-	cd docker && docker-compose logs -f app
+logs-poller:
+	@echo "📋 Showing alert-poller logs..."
+	cd docker && docker-compose logs -f alert-poller
 
 # Show MCP server logs only
 logs-mcp:
-	@echo "📋 Showing MCP server logs..."
-	cd docker && docker-compose logs -f mcp-server
+	@echo "📋 Showing MCP tools logs..."
+	cd docker && docker-compose logs -f mcp-tools
+
+# Show SSE relay logs
+logs-sse:
+	@echo "📋 Showing SSE relay logs..."
+	cd docker && docker-compose logs -f sse-relay
 
 # Show container status
 status:
@@ -92,32 +99,32 @@ status:
 # Run tests
 test:
 	@echo "🧪 Running test suite..."
-	cd docker && docker-compose exec app pytest -v
+	cd docker && docker-compose exec alert-poller pytest -v
 
 # Create test alerts for quick testing
 test-alert:
 	@echo "🚨 Creating test Hebrew missile alert..."
 	@curl -X POST "http://localhost:8000/api/test/fake-alert" \
-		-H "X-API-Key: poha-test-key-2024-secure" \
+		-H "X-API-Key: $${API_KEY:-dev-secret-key}" \
 		-H "Content-Type: application/json" \
 		-d '{"data": ["תל אביב - מרכז העיר", "רמת גן"], "cat": "1", "language": "he"}' \
-		-s | jq '.'
+		-s | python3 -m json.tool 2>/dev/null || true
 
 test-alert-en:
 	@echo "🌍 Creating test English earthquake alert..."
 	@curl -X POST "http://localhost:8000/api/test/fake-alert" \
-		-H "X-API-Key: poha-test-key-2024-secure" \
+		-H "X-API-Key: $${API_KEY:-dev-secret-key}" \
 		-H "Content-Type: application/json" \
 		-d '{"data": ["Jerusalem", "Haifa"], "cat": "3", "language": "en"}' \
-		-s | jq '.'
+		-s | python3 -m json.tool 2>/dev/null || true
 
 test-alert-drill:
 	@echo "📢 Creating test drill alert..."
 	@curl -X POST "http://localhost:8000/api/test/fake-alert" \
-		-H "X-API-Key: poha-test-key-2024-secure" \
+		-H "X-API-Key: $${API_KEY:-dev-secret-key}" \
 		-H "Content-Type: application/json" \
 		-d '{"data": ["כל הארץ"], "cat": "101", "language": "he"}' \
-		-s | jq '.'
+		-s | python3 -m json.tool 2>/dev/null || true
 
 # Comprehensive cleanup - POHA containers only
 clean:
@@ -137,7 +144,25 @@ clean-all:
 	@echo "✅ Full cleanup complete!"
 
 # Development workflow shortcuts
-dev: restart logs-app
+dev: restart logs-poller
+
+# One-command deploy: build, start, and verify
+deploy:
+	@echo "🚀 Deploying Pikud HaOref Alert System..."
+	@test -f .env || (cp .env.example .env && echo "📝 Created .env from .env.example — edit API_KEY before production!")
+	@make build
+	@make up
+	@echo "⏳ Waiting for services to become healthy..."
+	@sleep 10
+	@echo "=== Health Check ==="
+	@curl -sf http://localhost:8000/health && echo " ✅ Alert Poller OK" || echo " ❌ Alert Poller FAILED"
+	@curl -sf -X POST http://localhost:8001/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"healthcheck","version":"0.1"}}}' > /dev/null && echo "✅ MCP Tools OK" || echo "❌ MCP Tools FAILED"
+	@curl -sf http://localhost:8002/api/alerts-stream --max-time 2 > /dev/null 2>&1; echo "✅ SSE Relay OK"
+	@echo ""
+	@echo "🎉 Deployment complete!"
+	@echo "📱 Alert Poller: http://localhost:8000  (Swagger: /docs)"
+	@echo "📱 MCP Tools:    http://localhost:8001/mcp"
+	@echo "📱 SSE Relay:    http://localhost:8002/api/alerts-stream"
 	@echo "🔄 Development mode: containers restarted, showing app logs"
 
 # Quick app-only restart (faster for code changes)

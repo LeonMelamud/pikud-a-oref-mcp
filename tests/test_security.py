@@ -2,8 +2,8 @@ import pytest
 from unittest.mock import patch, Mock
 from fastapi import Request, HTTPException
 from fastapi.responses import Response
-from security import geo_ip_middleware, get_api_key
-from geolocation import MAXMIND_DB_PATH
+from src.utils.security import geo_ip_middleware, get_api_key
+from src.utils.geolocation import MAXMIND_DB_PATH
 
 # A simple async function to be used as the 'call_next' argument in middleware
 async def mock_call_next(request: Request):
@@ -28,7 +28,7 @@ async def test_geo_ip_middleware_allows_non_stream_requests():
     assert response.status_code == 200
 
 @pytest.mark.asyncio
-@patch('security.get_geoip_reader')
+@patch('src.utils.security.get_geoip_reader')
 async def test_geo_ip_middleware_allows_israel_ip(mock_get_reader):
     """
     Tests that an IP address identified as being from Israel ('IL') is
@@ -55,7 +55,7 @@ async def test_geo_ip_middleware_allows_israel_ip(mock_get_reader):
     mock_reader.country.assert_called_with('1.2.3.4')
 
 @pytest.mark.asyncio
-@patch('src.security.get_geoip_reader')
+@patch('src.utils.security.get_geoip_reader')
 async def test_geo_ip_middleware_blocks_non_israel_ip(mock_get_reader):
     """
     Tests that an IP address from outside Israel is blocked with an
@@ -95,8 +95,8 @@ async def test_geo_ip_middleware_allows_if_db_not_configured():
     Tests that if the GeoIP database is not configured (path is None),
     the middleware allows the request to proceed without performing an IP check.
     """
-    with patch('geolocation.MAXMIND_DB_PATH', None):
-        with patch('security.get_geoip_reader') as mock_get_reader:
+    with patch('src.utils.geolocation.MAXMIND_DB_PATH', None):
+        with patch('src.utils.security.get_geoip_reader') as mock_get_reader:
             # Arrange
             request = Request({"type": "http", "method": "GET", "path": "/api/alerts-stream", "headers": [], "client": ("1.2.3.4", 123)})
 

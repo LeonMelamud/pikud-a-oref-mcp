@@ -20,6 +20,7 @@ from fuzzywuzzy import fuzz, process
 
 # Import our existing polling functionality for reference
 from ..services.polling import POHA_API_URL, REQUEST_HEADERS
+from ..db.database import init_db, get_alerts_by_city as db_get_alerts_by_city, get_recent_alerts, get_alert_stats
 
 # Define the history URL here as it's no longer in polling.py
 POHA_HISTORY_API_URL = "https://www.oref.org.il/WarningMessages/alert/History/AlertsHistory.json"
@@ -48,7 +49,7 @@ CACHE_DURATION = timedelta(hours=1) # Cache for 1 hour
 
 # SSE Client Configuration
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "http://localhost:8000/api/webhook/alerts")
-API_KEY = os.getenv("API_KEY", "poha-test-key-2024-secure")
+API_KEY = os.getenv("API_KEY", "dev-secret-key")
 
 class AlertSubscriber:
     """SSE client for subscribing to alerts from the FastAPI webhook"""
@@ -451,14 +452,65 @@ async def get_current_status() -> str:
     }, indent=2)
 
 
+@mcp.tool()
+async def get_city_alerts(city: str, limit: int = 20) -> str:
+    """
+    Get alert history for a specific city from the local SQLite database.
+
+    Args:
+        city: City name in Hebrew (e.g., "תל אביב - יפו")
+        limit: Maximum number of alerts to return (1-100, default: 20)
+    """
+    logger.info(f"🔍 Querying SQLite for alerts in city: {city}")
+    try:
+        await init_db()
+        alerts = await db_get_alerts_by_city(city, limit=min(max(1, limit), 100))
+    except Exception as e:
+        logger.error(f"Error querying city alerts: {e}")
+        return f"❌ Error querying alerts for {city}: {e}"
+
+    if not alerts:
+        return f"No alerts found for city: {city}"
+
+    text = f"📋 **Alert History for {city}** (showing {len(alerts)} alerts)\n\n"
+    text += "| Areas | Time |\n|---|---|\n"
+    for a in alerts:
+        areas = ", ".join(a.get("data", []))
+        text += f"| {areas} | {a.get('timestamp', 'N/A')} |\n"
+    return text
+
+
+@mcp.tool()
+async def get_db_stats() -> str:
+    """Get statistics about the local alert database."""
+    logger.info("📊 Querying database statistics")
+    try:
+        await init_db()
+        stats = await get_alert_stats()
+    except Exception as e:
+        logger.error(f"Error querying stats: {e}")
+        return f"❌ Error: {e}"
+
+    text = f"📊 **Alert Database Statistics**\n\n"
+    text += f"**Total Alerts:** {stats['total_alerts']}\n"
+    text += f"**Total City Entries:** {stats['total_city_entries']}\n\n"
+    if stats["top_cities"]:
+        text += "**Top Cities:**\n"
+        for c in stats["top_cities"]:
+            text += f"- {c['city']}: {c['count']} alerts\n"
+    return text
+
+
 
 if __name__ == "__main__":
+    port = int(os.getenv("PORT", os.getenv("MCP_PORT", "8001")))
     logger.info("🚀 Starting Pikud Haoref Alert MCP Server (HTTP Transport)")
     logger.info(f"🔗 Will connect to SSE webhook: {WEBHOOK_URL}")
+    logger.info(f"🌐 Listening on port: {port}")
 
     # Run the MCP server with the streamable-http transport
     mcp.run(
         transport="streamable-http",
         host="0.0.0.0",
-        port=8001
+        port=port
     )

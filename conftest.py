@@ -3,8 +3,14 @@ import asyncio
 import threading
 import time
 import uvicorn
+from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
-from main import app
+
+# Mock the background tasks and db init before importing
+with patch('src.services.polling.poll_for_alerts', new=AsyncMock()), \
+     patch('src.db.database.init_db', new=AsyncMock()), \
+     patch('src.db.database.close_db', new=AsyncMock()):
+    from src.api.main import app
 
 
 @pytest.fixture

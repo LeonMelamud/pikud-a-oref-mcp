@@ -286,3 +286,30 @@ If issues occur:
 ---
 
 **Note:** This plan creates a true pub-sub system where the MCP server becomes an event-driven subscriber rather than an active poller, improving efficiency and scalability.
+
+---
+
+## Phase 2: Deploy, Extend, Integrate (February 2026)
+
+### Completed
+
+- [x] **Pub-sub architecture** — MCP server subscribes to FastAPI SSE webhook
+- [x] **SSE Gateway** — Separate gateway for VS Code extension relay
+- [x] **VS Code extension** — Tree view, notifications, test alerts
+- [x] **Docker 3-service setup** — app, mcp-server, sse-gateway
+- [x] **SQLite persistence** — `src/db/database.py` with `aiosqlite`, auto-init on startup
+- [x] **REST API endpoints** — `/health`, `/api/alerts/history`, `/api/alerts/city/{name}`, `/api/alerts/stats`
+- [x] **Fix VS Code extension** — configurable `serverUrl`, exact `deleteAlert`, `clearAllAlerts`, settings change listener, proper `deactivate()`
+- [x] **Fix test imports** — all tests use `src.`-prefixed imports and patch paths
+- [x] **Railway deployment config** — `railway.toml`, hardened Dockerfiles, `.env.example`, dynamic `$PORT`
+- [x] **OpenClaw MCP integration** — skill definition, config example, `get_city_alerts` + `get_db_stats` MCP tools
+- [x] **AGENTS.md** — project overview, architecture, conventions
+
+### Deferred
+
+- [ ] Redis pub-sub migration (solves single-consumer queue but adds external dependency)
+- [ ] GeoIP bundling (disabled for external deployment)
+- [ ] Extension TypeScript unit tests
+- [ ] Rate limiting re-enablement
+- [ ] Multi-instance horizontal scaling (SQLite = single-writer)
+- [ ] GitHub Actions CI pipeline

@@ -4,6 +4,7 @@ import json
 import logging
 from ..core.alert_queue import alert_queue
 from ..core.state import app_state
+from ..db.database import save_alert
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,9 @@ async def poll_for_alerts():
 
                     structured_alert = {
                         "id": current_id,
+                        "cat": alert_data.get("cat"),
                         "type": get_alert_type_by_category(alert_data.get("cat")),
+                        "title": alert_data.get("title"),
                         "cities": cities,
                         "instructions": alert_data.get("title")
                     }
@@ -89,6 +92,7 @@ async def poll_for_alerts():
                     app_state.last_alert_id = current_id
                     logger.info(f"New alert detected: {structured_alert}")
                     await alert_queue.put(structured_alert)
+                    await save_alert(structured_alert)
 
             except httpx.RequestError as e:
                 logger.error(f"A network error occurred while requesting alerts: {e}")

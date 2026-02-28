@@ -2,8 +2,8 @@ import asyncio
 import pytest
 from unittest.mock import Mock, AsyncMock
 
-from sse import alert_event_generator
-from alert_queue import alert_queue
+from src.services.sse import alert_event_generator
+from src.core.alert_queue import alert_queue
 
 @pytest.mark.asyncio
 async def test_alert_event_generator_yields_formatted_alert():

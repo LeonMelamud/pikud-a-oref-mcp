@@ -1,46 +1,67 @@
-version: '3.8'
-
 services:
-  app:
+  # Main API: polls oref.org.il, persists to SQLite, serves REST + SSE
+  alert-poller:
     build:
       context: ..
       dockerfile: docker/Dockerfile
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:${PORT:-8000}"
+    env_file: ../.env
     environment:
       - PYTHONUNBUFFERED=1
-    container_name: poha-app
+      - DATABASE_PATH=/app/data/alerts.db
+      - PORT=${PORT:-8000}
+    volumes:
+      - alert-data:/app/data
+    container_name: poha-alert-poller
     restart: unless-stopped
 
-  mcp-server:
+  # MCP server: exposes alert tools for LLMs via streamable-http
+  mcp-tools:
     build:
       context: ..
       dockerfile: docker/mcp.Dockerfile
     ports:
-      - "8001:8001"
+      - "${MCP_PORT:-8001}:${MCP_PORT:-8001}"
+    env_file: ../.env
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
-      - WEBHOOK_URL=http://app:8000/api/webhook/alerts
-      - API_KEY=poha-test-key-2024-secure
-    container_name: poha-mcp-server
+      - WEBHOOK_URL=http://alert-poller:${PORT:-8000}/api/webhook/alerts
+      - DATABASE_PATH=/app/data/alerts.db
+    volumes:
+      - alert-data:/app/data
+    container_name: poha-mcp-tools
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:${MCP_PORT:-8001}/mcp')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     depends_on:
-      - app
+      alert-poller:
+        condition: service_healthy
 
-  sse-gateway:
+  # SSE relay: forwards alerts to VS Code extension and other SSE clients
+  sse-relay:
     build:
       context: ..
       dockerfile: docker/Dockerfile
     ports:
-      - "8002:8002"
+      - "${SSE_PORT:-8002}:${SSE_PORT:-8002}"
+    env_file: ../.env
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
-      - WEBHOOK_URL=http://app:8000/api/webhook/alerts
-      - API_KEY=poha-test-key-2024-secure
-    container_name: poha-sse-gateway
+      - WEBHOOK_URL=http://alert-poller:${PORT:-8000}/api/alerts-stream
+    container_name: poha-sse-relay
     restart: unless-stopped
-    command: uvicorn src.api.sse_gateway:app --host 0.0.0.0 --port 8002
+    command: uvicorn src.api.sse_gateway:app --host 0.0.0.0 --port ${SSE_PORT:-8002}
     depends_on:
-      - app 
+      alert-poller:
+        condition: service_healthy
+
+volumes:
+  alert-data:
+    name: poha-alert-data

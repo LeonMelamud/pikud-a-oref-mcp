@@ -3,7 +3,7 @@ import pytest
 import respx
 from httpx import Response
 from unittest.mock import AsyncMock, patch
-from polling import poll_for_alerts, POHA_API_URL, POHA_HISTORY_API_URL, get_alert_type_by_category
+from src.services.polling import poll_for_alerts, POHA_API_URL, get_alert_type_by_category
 
 # Helper to create a mock alert
 def create_mock_alert(alert_id, cat, data, title):
@@ -17,9 +17,10 @@ async def test_poll_for_alerts_new_alert_found_on_primary():
     """
     mock_alert = create_mock_alert("12345", 1, ["Tel Aviv"], "Enter Shelters")
     respx.get(POHA_API_URL).mock(return_value=Response(200, json=mock_alert))
-    respx.get(POHA_HISTORY_API_URL).mock(return_value=Response(200, text=""))
 
-    with patch('polling.app_state') as mock_state, patch('polling.alert_queue') as mock_queue:
+    with patch('src.services.polling.app_state') as mock_state, \
+         patch('src.services.polling.alert_queue') as mock_queue, \
+         patch('src.services.polling.save_alert', new=AsyncMock()):
         mock_state.last_alert_id = None
         mock_queue.put = AsyncMock()
 
@@ -38,35 +39,6 @@ async def test_poll_for_alerts_new_alert_found_on_primary():
         polling_task.cancel()
         await asyncio.gather(polling_task, return_exceptions=True)
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_poll_for_alerts_fallback_to_history_api():
-    """
-    Tests that the poller falls back to the history API when the primary is empty.
-    """
-    mock_alert = create_mock_alert("67890", 5, ["Haifa"], "Hostile Aircraft")
-    respx.get(POHA_API_URL).mock(return_value=Response(200, text=""))
-    respx.get(POHA_HISTORY_API_URL).mock(return_value=Response(200, json=[mock_alert]))
-
-    with patch('polling.app_state') as mock_state, patch('polling.alert_queue') as mock_queue:
-        mock_state.last_alert_id = None
-        mock_queue.put = AsyncMock()
-
-        polling_task = asyncio.create_task(poll_for_alerts())
-        await asyncio.sleep(0.1)
-
-        assert mock_state.last_alert_id == "67890"
-        expected_alert = {
-            "id": "67890",
-            "type": "hostileAircraftIntrusion",
-            "cities": ["Haifa"],
-            "instructions": "Hostile Aircraft"
-        }
-        mock_queue.put.assert_called_with(expected_alert)
-
-        polling_task.cancel()
-        await asyncio.gather(polling_task, return_exceptions=True)
-
 
 @pytest.mark.asyncio
 @respx.mock
@@ -76,9 +48,10 @@ async def test_poll_for_alerts_no_new_alert():
     """
     mock_alert = create_mock_alert("12345", 1, ["Tel Aviv"], "Enter Shelters")
     respx.get(POHA_API_URL).mock(return_value=Response(200, json=mock_alert))
-    respx.get(POHA_HISTORY_API_URL).mock(return_value=Response(200, text=""))
 
-    with patch('polling.app_state') as mock_state, patch('polling.alert_queue') as mock_queue:
+    with patch('src.services.polling.app_state') as mock_state, \
+         patch('src.services.polling.alert_queue') as mock_queue, \
+         patch('src.services.polling.save_alert', new=AsyncMock()):
         mock_state.last_alert_id = "12345"
         mock_queue.put = AsyncMock()
 
@@ -99,9 +72,10 @@ async def test_poll_for_alerts_filters_test_alerts():
     """
     mock_alert = create_mock_alert("55555", 1, ["Test City בדיקה"], "Test")
     respx.get(POHA_API_URL).mock(return_value=Response(200, json=mock_alert))
-    respx.get(POHA_HISTORY_API_URL).mock(return_value=Response(200, text=""))
 
-    with patch('polling.app_state') as mock_state, patch('polling.alert_queue') as mock_queue:
+    with patch('src.services.polling.app_state') as mock_state, \
+         patch('src.services.polling.alert_queue') as mock_queue, \
+         patch('src.services.polling.save_alert', new=AsyncMock()):
         mock_state.last_alert_id = None
         mock_queue.put = AsyncMock()
 
@@ -119,12 +93,12 @@ async def test_poll_for_alerts_filters_test_alerts():
 @respx.mock
 async def test_poll_for_alerts_handles_api_errors_gracefully():
     """
-    Tests that the poller handles HTTP errors from both APIs without crashing.
+    Tests that the poller handles HTTP errors from the API without crashing.
     """
     respx.get(POHA_API_URL).mock(return_value=Response(500))
-    respx.get(POHA_HISTORY_API_URL).mock(return_value=Response(500))
 
-    with patch('polling.alert_queue') as mock_queue:
+    with patch('src.services.polling.alert_queue') as mock_queue, \
+         patch('src.services.polling.save_alert', new=AsyncMock()):
         mock_queue.put = AsyncMock()
 
         polling_task = asyncio.create_task(poll_for_alerts())
