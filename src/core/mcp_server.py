@@ -503,14 +503,25 @@ async def get_db_stats() -> str:
 
 
 if __name__ == "__main__":
+    import uvicorn
+    from starlette.applications import Starlette
+    from starlette.routing import Route, Mount
+    from starlette.responses import JSONResponse
+
+    async def health(request):
+        return JSONResponse({"status": "ok", "service": "mcp-tools"})
+
     port = int(os.getenv("PORT", os.getenv("MCP_PORT", "8001")))
     logger.info("🚀 Starting Pikud Haoref Alert MCP Server (HTTP Transport)")
     logger.info(f"🔗 Will connect to SSE webhook: {WEBHOOK_URL}")
     logger.info(f"🌐 Listening on port: {port}")
 
-    # Run the MCP server with the streamable-http transport
-    mcp.run(
-        transport="streamable-http",
-        host="0.0.0.0",
-        port=port
+    # Get the MCP ASGI app and wrap it with a health endpoint
+    mcp_app = mcp.streamable_http_app()
+    app = Starlette(
+        routes=[
+            Route("/health", health),
+            Mount("/", app=mcp_app),
+        ],
     )
+    uvicorn.run(app, host="0.0.0.0", port=port)
