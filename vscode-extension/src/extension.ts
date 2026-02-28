@@ -151,8 +151,10 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
         const config = vscode.workspace.getConfiguration('pikudHaoref');
         const filterAreas = config.get<string[]>('filterAreas', []);
         if (filterAreas.length === 0) { return true; }
+        // Only check if the alert city contains the filter area as substring.
+        // NOT the reverse — that causes false positives (e.g. city "אזור" matching filter "אזור תעשייה בראון")
         return alert.cities.some(city =>
-            filterAreas.some(area => city.includes(area) || area.includes(city))
+            filterAreas.some(area => city.includes(area))
         );
     }
 
