@@ -24,6 +24,7 @@ async def test_init_db_creates_tables(test_db):
     )
     tables = [row["name"] for row in await cursor.fetchall()]
     assert "alerts" in tables
+    assert "cities" in tables
     assert "city_alerts" in tables
 
 
