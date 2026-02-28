@@ -14,28 +14,35 @@ interface Alert {
 }
 
 // Map internal type codes to human-readable labels with icons
-const ALERT_TYPE_LABELS: Record<string, { label: string; icon: string }> = {
-    missiles:                    { label: 'Missile Threat',             icon: '🚀' },
-    radiologicalEvent:           { label: 'Radiological Event',         icon: '☢️' },
-    earthQuake:                  { label: 'Earthquake',                 icon: '🌍' },
-    tsunami:                     { label: 'Tsunami',                    icon: '🌊' },
-    hostileAircraftIntrusion:    { label: 'Hostile Aircraft Intrusion',  icon: '✈️' },
-    hazardousMaterials:          { label: 'Hazardous Materials',        icon: '⚠️' },
-    terroristInfiltration:       { label: 'Terrorist Infiltration',     icon: '🔫' },
-    missilesDrill:               { label: 'Drill — Missile',            icon: '🔔' },
-    earthQuakeDrill:             { label: 'Drill — Earthquake',         icon: '🔔' },
-    radiologicalEventDrill:      { label: 'Drill — Radiological',       icon: '🔔' },
-    tsunamiDrill:                { label: 'Drill — Tsunami',            icon: '🔔' },
-    hostileAircraftIntrusionDrill:{ label: 'Drill — Aircraft',          icon: '🔔' },
-    hazardousMaterialsDrill:     { label: 'Drill — Hazmat',             icon: '🔔' },
-    terroristInfiltrationDrill:  { label: 'Drill — Infiltration',       icon: '🔔' },
-    newsFlash:                   { label: 'News Flash',                 icon: '📰' },
-    unknown:                     { label: 'Alert',                      icon: '🚨' },
+const ALERT_TYPE_LABELS: Record<string, { label: string; icon: string; svgIcon: string }> = {
+    missiles:                    { label: 'Missile Threat',             icon: '🚀', svgIcon: 'missiles.svg' },
+    radiologicalEvent:           { label: 'Radiological Event',         icon: '☢️', svgIcon: 'radiological.svg' },
+    earthQuake:                  { label: 'Earthquake',                 icon: '🌍', svgIcon: 'earthquake.svg' },
+    tsunami:                     { label: 'Tsunami',                    icon: '🌊', svgIcon: 'tsunami.svg' },
+    hostileAircraftIntrusion:    { label: 'Hostile Aircraft Intrusion',  icon: '✈️', svgIcon: 'aircraft.svg' },
+    hazardousMaterials:          { label: 'Hazardous Materials',        icon: '⚠️', svgIcon: 'hazmat.svg' },
+    terroristInfiltration:       { label: 'Terrorist Infiltration',     icon: '🔫', svgIcon: 'terrorist.svg' },
+    missilesDrill:               { label: 'Drill — Missile',            icon: '🔔', svgIcon: 'drill.svg' },
+    earthQuakeDrill:             { label: 'Drill — Earthquake',         icon: '🔔', svgIcon: 'drill.svg' },
+    radiologicalEventDrill:      { label: 'Drill — Radiological',       icon: '🔔', svgIcon: 'drill.svg' },
+    tsunamiDrill:                { label: 'Drill — Tsunami',            icon: '🔔', svgIcon: 'drill.svg' },
+    hostileAircraftIntrusionDrill:{ label: 'Drill — Aircraft',          icon: '🔔', svgIcon: 'drill.svg' },
+    hazardousMaterialsDrill:     { label: 'Drill — Hazmat',             icon: '🔔', svgIcon: 'drill.svg' },
+    terroristInfiltrationDrill:  { label: 'Drill — Infiltration',       icon: '🔔', svgIcon: 'drill.svg' },
+    allClear:                    { label: 'All Clear — Safe to Exit',   icon: '✅', svgIcon: 'all-clear.svg' },
+    newsFlash:                   { label: 'News Flash',                 icon: '📰', svgIcon: 'news.svg' },
+    unknown:                     { label: 'Alert',                      icon: '🚨', svgIcon: 'alert.svg' },
 };
 
 function formatAlertLabel(alert: Alert): string {
     const info = ALERT_TYPE_LABELS[alert.type] || ALERT_TYPE_LABELS['unknown'];
     return `${info.icon} ${info.label}`;
+}
+
+/** Get the SVG icon URI for an alert type */
+function getAlertIconPath(extensionPath: string, alertType: string): vscode.Uri {
+    const info = ALERT_TYPE_LABELS[alertType] || ALERT_TYPE_LABELS['unknown'];
+    return vscode.Uri.file(path.join(extensionPath, 'resources', 'icons', info.svgIcon));
 }
 
 function formatRelativeTime(iso: string): string {
@@ -200,6 +207,9 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
                     alertItem.kind = 'alert';
                     alertItem.contextValue = 'alertItem';
                     alertItem.description = `${alert.cities.length} areas · ${formatRelativeTime(alert.received_at)}`;
+                    if (this.extensionPath) {
+                        alertItem.iconPath = getAlertIconPath(this.extensionPath, alert.type);
+                    }
                     alertItem.tooltip = new vscode.MarkdownString(
                         `**${formatAlertLabel(alert)}**\n\n` +
                         `📍 **${alert.cities.length} areas** — ${alert.cities.slice(0, 5).join(', ')}${alert.cities.length > 5 ? ' …' : ''}\n\n` +
@@ -566,6 +576,12 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
 
     /** Resolve human-readable type from various data shapes */
     private resolveType(data: any): string {
+        // Detect "all clear" / safe-to-exit alerts by title keywords
+        const title = (data.title || data.title_en || data.instructions || '').toLowerCase();
+        const allClearKeywords = ['all clear', 'safe to exit', 'ניתן לצאת', 'חזרה לשגרה', 'הותר'];
+        if (allClearKeywords.some(kw => title.includes(kw))) {
+            return 'allClear';
+        }
         // SSE structured alert: has "type" like "missiles"
         if (data.type && ALERT_TYPE_LABELS[data.type]) {
             return data.type;
