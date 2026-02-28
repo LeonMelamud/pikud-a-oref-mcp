@@ -1,4 +1,7 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
+import { execFile } from 'child_process';
 
 const EventSource = require('eventsource');
 
@@ -45,13 +48,54 @@ function formatRelativeTime(iso: string): string {
     return new Date(iso).toLocaleDateString();
 }
 
+/** Return the absolute path to the sounds/ directory inside the extension */
+function getSoundsDir(extensionPath: string): string {
+    return path.join(extensionPath, 'sounds');
+}
+
+/** Scan sounds/ folder for .mp3 files */
+function discoverSounds(extensionPath: string): string[] {
+    const dir = getSoundsDir(extensionPath);
+    try {
+        return fs.readdirSync(dir)
+            .filter(f => f.toLowerCase().endsWith('.mp3'))
+            .sort();
+    } catch {
+        return [];
+    }
+}
+
+/** Play an MP3 file using the OS audio command */
+function playSound(filePath: string): void {
+    const platform = process.platform;
+    if (platform === 'darwin') {
+        execFile('afplay', [filePath], (err) => {
+            if (err) { console.error('Sound playback error:', err.message); }
+        });
+    } else if (platform === 'linux') {
+        // Try paplay (PulseAudio) first, fall back to aplay
+        execFile('paplay', [filePath], (err) => {
+            if (err) {
+                execFile('aplay', [filePath], (err2) => {
+                    if (err2) { console.error('Sound playback error:', err2.message); }
+                });
+            }
+        });
+    } else if (platform === 'win32') {
+        execFile('powershell', ['-c', `(New-Object Media.SoundPlayer '${filePath}').PlaySync()`], (err) => {
+            if (err) { console.error('Sound playback error:', err.message); }
+        });
+    }
+}
+
 /** Tree item types to distinguish children in getChildren() */
-type TreeNodeKind = 'status' | 'empty' | 'alert' | 'section' | 'city' | 'detail';
+type TreeNodeKind = 'status' | 'empty' | 'alert' | 'section' | 'city' | 'detail' | 'controls' | 'soundToggle' | 'soundPicker' | 'filterHeader' | 'filterArea';
 
 class AlertItem extends vscode.TreeItem {
     alert?: Alert;
     kind: TreeNodeKind = 'detail';
     children?: AlertItem[];
+    areaName?: string; // used for filterArea items to know which area to remove
 
     constructor(
         public readonly label: string,
@@ -76,9 +120,37 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
     private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     private static readonly HEARTBEAT_CHECK_INTERVAL = 10000; // check every 10s
     private static readonly HEARTBEAT_TIMEOUT = 45000; // no data for 45s = dead
+    private extensionPath: string = '';
+    private knownCities: Set<string> = new Set();
 
     constructor() {
         // Don't auto-start here; activate() calls startListening()
+    }
+
+    /** Get all unique cities seen across all alerts */
+    getKnownCities(): string[] {
+        return [...this.knownCities].sort();
+    }
+
+    /** Track cities from an alert */
+    private trackCities(cities: string[]) {
+        for (const city of cities) {
+            this.knownCities.add(city);
+        }
+    }
+
+    /** Check if an alert matches the area filter (empty filter = match all) */
+    private matchesAreaFilter(alert: Alert): boolean {
+        const config = vscode.workspace.getConfiguration('pikudHaoref');
+        const filterAreas = config.get<string[]>('filterAreas', []);
+        if (filterAreas.length === 0) { return true; }
+        return alert.cities.some(city =>
+            filterAreas.some(area => city.includes(area) || area.includes(city))
+        );
+    }
+
+    setExtensionPath(extPath: string) {
+        this.extensionPath = extPath;
     }
 
     refresh(): void {
@@ -91,9 +163,10 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
 
     getChildren(element?: AlertItem): Thenable<AlertItem[]> {
         if (!element) {
-            // Root level — status + alerts
+            // Root level — status + controls + alerts
             const items: AlertItem[] = [];
 
+            // --- Status ---
             const statusItem = new AlertItem(
                 this.isConnected ? '🟢 Connected' : '🔴 Disconnected',
                 vscode.TreeItemCollapsibleState.None
@@ -102,6 +175,16 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
             statusItem.description = this.isConnected ? 'Live' : 'Retrying…';
             items.push(statusItem);
 
+            // --- Controls panel ---
+            const controlsItem = new AlertItem(
+                '⚙️ Controls',
+                vscode.TreeItemCollapsibleState.Collapsed
+            );
+            controlsItem.kind = 'controls';
+            controlsItem.id = 'controls-panel';
+            items.push(controlsItem);
+
+            // --- Alerts ---
             if (this.alerts.length === 0) {
                 const empty = new AlertItem('📭 No alerts yet', vscode.TreeItemCollapsibleState.None);
                 empty.kind = 'empty';
@@ -133,6 +216,68 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
         // If this node has pre-built children, return them
         if (element.children) {
             return Promise.resolve(element.children);
+        }
+
+        // Controls panel children
+        if (element.kind === 'controls') {
+            const config = vscode.workspace.getConfiguration('pikudHaoref');
+            const children: AlertItem[] = [];
+
+            // Sound toggle
+            const enableSound = config.get<boolean>('enableSound', true);
+            const alertSoundFile = config.get<string>('alertSound', 'worms.mp3');
+            const soundToggle = new AlertItem(
+                enableSound ? '🔊 Sound: ON' : '🔇 Sound: OFF',
+                vscode.TreeItemCollapsibleState.None
+            );
+            soundToggle.kind = 'soundToggle';
+            soundToggle.id = 'ctrl-sound-toggle';
+            soundToggle.description = enableSound ? alertSoundFile : 'click to enable';
+            soundToggle.contextValue = 'soundToggle';
+            soundToggle.command = { command: 'pikudHaoref.toggleSound', title: 'Toggle Sound' };
+            soundToggle.tooltip = 'Click to toggle alert sound on/off';
+            children.push(soundToggle);
+
+            // Sound picker
+            const soundPicker = new AlertItem(
+                '🎵 Change Sound',
+                vscode.TreeItemCollapsibleState.None
+            );
+            soundPicker.kind = 'soundPicker';
+            soundPicker.id = 'ctrl-sound-picker';
+            soundPicker.description = alertSoundFile;
+            soundPicker.contextValue = 'soundPicker';
+            soundPicker.command = { command: 'pikudHaoref.selectAlertSound', title: 'Select Sound' };
+            soundPicker.tooltip = 'Click to choose alert sound file';
+            children.push(soundPicker);
+
+            // Filter header
+            const filterAreas = config.get<string[]>('filterAreas', []);
+            const filterHeader = new AlertItem(
+                '📍 Area Filter',
+                filterAreas.length > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None
+            );
+            filterHeader.kind = 'filterHeader';
+            filterHeader.id = 'ctrl-filter-header';
+            filterHeader.description = filterAreas.length === 0 ? 'All areas (click to set)' : `${filterAreas.length} areas`;
+            filterHeader.contextValue = 'filterHeader';
+            filterHeader.command = { command: 'pikudHaoref.selectFilterAreas', title: 'Edit Filter' };
+            filterHeader.tooltip = 'Click to select which areas trigger alerts';
+            if (filterAreas.length > 0) {
+                filterHeader.children = filterAreas.map(area => {
+                    const areaItem = new AlertItem(area, vscode.TreeItemCollapsibleState.None);
+                    areaItem.kind = 'filterArea';
+                    areaItem.id = `ctrl-filter-${area}`;
+                    areaItem.areaName = area;
+                    areaItem.contextValue = 'filterArea';
+                    areaItem.iconPath = new vscode.ThemeIcon('location');
+                    areaItem.tooltip = `Click × to remove ${area} from filter`;
+                    return areaItem;
+                });
+            }
+            children.push(filterHeader);
+
+            return Promise.resolve(children);
         }
 
         // Alert detail level
@@ -241,6 +386,9 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
                         received_at: new Date().toISOString()
                     };
 
+                    // Track all cities we've ever seen
+                    this.trackCities(alert.cities);
+
                     // Add to beginning of array (most recent first)
                     this.alerts.unshift(alert);
                     
@@ -251,14 +399,30 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
 
                     this.refresh();
 
-                    // Show notification if enabled
-                    if (enableNotifications) {
+                    // Check area filter — notifications + sound only for matching areas
+                    const alertMatchesFilter = this.matchesAreaFilter(alert);
+
+                    // Show notification if enabled and area matches
+                    if (enableNotifications && alertMatchesFilter) {
                         const message = `🚨 EMERGENCY ALERT: ${alert.cities.join(', ')} - ${alert.type}`;
                         vscode.window.showWarningMessage(message, 'View Details').then(selection => {
                             if (selection === 'View Details') {
                                 vscode.commands.executeCommand('workbench.view.explorer');
                             }
                         });
+                    }
+
+                    // Play alert sound if enabled and area matches
+                    if (alertMatchesFilter) {
+                        const soundConfig = vscode.workspace.getConfiguration('pikudHaoref');
+                        const enableSound = soundConfig.get<boolean>('enableSound', true);
+                        const alertSoundFile = soundConfig.get<string>('alertSound', 'worms.mp3');
+                        if (enableSound && alertSoundFile && this.extensionPath) {
+                            const soundPath = path.join(getSoundsDir(this.extensionPath), alertSoundFile);
+                            if (fs.existsSync(soundPath)) {
+                                playSound(soundPath);
+                            }
+                        }
                     }
 
                     console.log('New alert received:', alert);
@@ -379,10 +543,12 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
             const existingIds = new Set(this.alerts.map(a => a.id));
             for (const row of body.alerts) {
                 if (existingIds.has(row.id)) { continue; }
+                const cities = row.data || [];
+                this.trackCities(cities);
                 this.alerts.push({
                     id: row.id,
                     type: this.resolveType(row),
-                    cities: row.data || [],
+                    cities,
                     instructions: row.title || row.desc || 'Follow safety instructions',
                     received_at: row.timestamp || new Date().toISOString(),
                 });
@@ -485,6 +651,7 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
 
 export function activate(context: vscode.ExtensionContext) {
     const alertProvider = new AlertProvider();
+    alertProvider.setExtensionPath(context.extensionPath);
     
     // Register tree data provider
     vscode.window.registerTreeDataProvider('pikudHaorefAlerts', alertProvider);
@@ -496,6 +663,90 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('pikudHaoref.testAlert', () => alertProvider.sendTestAlert()),
         vscode.commands.registerCommand('pikudHaoref.deleteAlert', (item: AlertItem) => alertProvider.deleteAlert(item)),
         vscode.commands.registerCommand('pikudHaoref.clearAllAlerts', () => alertProvider.clearAllAlerts()),
+        vscode.commands.registerCommand('pikudHaoref.toggleSound', async () => {
+            const config = vscode.workspace.getConfiguration('pikudHaoref');
+            const current = config.get<boolean>('enableSound', true);
+            await config.update('enableSound', !current, vscode.ConfigurationTarget.Global);
+            alertProvider.refresh();
+            vscode.window.showInformationMessage(current ? '🔇 Alert sound disabled' : '🔊 Alert sound enabled');
+        }),
+        vscode.commands.registerCommand('pikudHaoref.removeFilterArea', async (item: AlertItem) => {
+            if (!item.areaName) { return; }
+            const config = vscode.workspace.getConfiguration('pikudHaoref');
+            const current = config.get<string[]>('filterAreas', []);
+            const updated = current.filter(a => a !== item.areaName);
+            await config.update('filterAreas', updated, vscode.ConfigurationTarget.Global);
+            alertProvider.refresh();
+            vscode.window.showInformationMessage(`📍 Removed "${item.areaName}" from filter`);
+        }),
+        vscode.commands.registerCommand('pikudHaoref.selectFilterAreas', async () => {
+            const config = vscode.workspace.getConfiguration('pikudHaoref');
+            const currentFilter = config.get<string[]>('filterAreas', []);
+            const allCities = alertProvider.getKnownCities();
+
+            // Merge known cities + current filter (in case filter has cities not yet seen)
+            const allOptions = [...new Set([...allCities, ...currentFilter])].sort();
+
+            if (allOptions.length === 0) {
+                // No history yet — allow manual entry
+                const input = await vscode.window.showInputBox({
+                    prompt: 'Enter area names separated by commas (no alerts received yet to pick from)',
+                    placeHolder: 'e.g. תל אביב, רמת גן, חיפה'
+                });
+                if (input) {
+                    const areas = input.split(',').map(s => s.trim()).filter(Boolean);
+                    await config.update('filterAreas', areas, vscode.ConfigurationTarget.Global);
+                    alertProvider.refresh();
+                    vscode.window.showInformationMessage(`📍 Area filter set: ${areas.join(', ')}`);
+                }
+                return;
+            }
+
+            const items = allOptions.map(city => ({
+                label: city,
+                picked: currentFilter.includes(city)
+            }));
+
+            const picked = await vscode.window.showQuickPick(items, {
+                canPickMany: true,
+                placeHolder: 'Select areas to filter alerts (empty = all alerts)',
+                title: 'Alert Area Filter'
+            });
+
+            if (picked !== undefined) {
+                const selectedAreas = picked.map(p => p.label);
+                await config.update('filterAreas', selectedAreas, vscode.ConfigurationTarget.Global);
+                alertProvider.refresh();
+                if (selectedAreas.length === 0) {
+                    vscode.window.showInformationMessage('📍 Area filter cleared — receiving all alerts');
+                } else {
+                    vscode.window.showInformationMessage(`📍 Area filter set: ${selectedAreas.join(', ')}`);
+                }
+            }
+        }),
+        vscode.commands.registerCommand('pikudHaoref.selectAlertSound', async () => {
+            const sounds = discoverSounds(context.extensionPath);
+            if (sounds.length === 0) {
+                vscode.window.showWarningMessage('No .mp3 files found in the sounds/ folder.');
+                return;
+            }
+            const config = vscode.workspace.getConfiguration('pikudHaoref');
+            const current = config.get<string>('alertSound', '');
+            const items = sounds.map(s => ({
+                label: s === current ? `$(check) ${s}` : s,
+                description: s === current ? 'currently selected' : '',
+                file: s
+            }));
+            const picked = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Select an alert sound (.mp3)',
+                title: 'Alert Sound'
+            });
+            if (picked) {
+                await config.update('alertSound', picked.file, vscode.ConfigurationTarget.Global);
+                alertProvider.refresh();
+                vscode.window.showInformationMessage(`🔊 Alert sound set to: ${picked.file}`);
+            }
+        }),
         vscode.commands.registerCommand('pikudHaoref.installExtension', () => {
             vscode.window.showInformationMessage(
                 '📦 To install this extension:\n\n1. Download the VSIX file: pikud-haoref-alerts-1.0.0.vsix\n2. Run: code --install-extension pikud-haoref-alerts-1.0.0.vsix\n3. Or use VS Code Extensions view > Install from VSIX',
@@ -509,11 +760,16 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // Auto-reconnect when settings change
+    // Auto-reconnect when settings change, refresh controls when sound/filter changes
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration(e => {
             if (e.affectsConfiguration('pikudHaoref.apiUrl') || e.affectsConfiguration('pikudHaoref.serverUrl')) {
                 alertProvider.startListening();
+            }
+            if (e.affectsConfiguration('pikudHaoref.enableSound') ||
+                e.affectsConfiguration('pikudHaoref.alertSound') ||
+                e.affectsConfiguration('pikudHaoref.filterAreas')) {
+                alertProvider.refresh();
             }
         })
     );

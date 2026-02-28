@@ -1,8 +1,8 @@
 {
   "name": "pikud-haoref-alerts",
-  "displayName": "Pikud Haoref Emergency Alerts MCP",
+  "displayName": "Pikud Haoref Emergency Alerts MCP + Sound Effects",
   "description": "Real-time Israeli emergency alerts in VS Code",
-  "version": "1.2.0",
+  "version": "1.2.5",
   "publisher": "leon-melamud",
   "author": "Leon Melamud",
   "icon": "Pakar.png",
@@ -46,6 +46,29 @@
         "command": "pikudHaoref.clearAllAlerts",
         "title": "Clear All Alerts",
         "category": "Pikud Haoref"
+      },
+      {
+        "command": "pikudHaoref.selectAlertSound",
+        "title": "Select Alert Sound",
+        "category": "Pikud Haoref"
+      },
+      {
+        "command": "pikudHaoref.selectFilterAreas",
+        "title": "Select Alert Areas Filter",
+        "category": "Pikud Haoref"
+      },
+      {
+        "command": "pikudHaoref.toggleSound",
+        "title": "Toggle Alert Sound",
+        "category": "Pikud Haoref"
+      },
+      {
+        "command": "pikudHaoref.removeFilterArea",
+        "title": "Remove Area from Filter",
+        "icon": {
+          "light": "./resources/light/delete.svg",
+          "dark": "./resources/dark/delete.svg"
+        }
       }
     ],
     "viewsContainers": {
@@ -70,6 +93,11 @@
         {
           "command": "pikudHaoref.deleteAlert",
           "when": "view == pikudHaorefAlerts && viewItem == alertItem",
+          "group": "inline"
+        },
+        {
+          "command": "pikudHaoref.removeFilterArea",
+          "when": "view == pikudHaorefAlerts && viewItem == filterArea",
           "group": "inline"
         }
       ]
@@ -96,6 +124,22 @@
           "type": "string",
           "default": "http://localhost:8000",
           "description": "Base URL of the Pikud Haoref FastAPI server (used for sending test alerts)"
+        },
+        "pikudHaoref.enableSound": {
+          "type": "boolean",
+          "default": true,
+          "description": "Play a sound when a new alert is received."
+        },
+        "pikudHaoref.alertSound": {
+          "type": "string",
+          "default": "worms.mp3",
+          "description": "MP3 file to play on alert. Place .mp3 files in the extension's sounds/ folder. Use 'Pikud Haoref: Select Alert Sound' command to pick from available sounds."
+        },
+        "pikudHaoref.filterAreas": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Filter alerts by area names. Only matching alerts trigger notifications and sound. Empty = all alerts."
         }
       }
     }
