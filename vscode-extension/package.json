@@ -2,7 +2,7 @@
   "name": "pikud-haoref-alerts",
   "displayName": "Pikud Haoref Emergency Alerts MCP + Sound Effects",
   "description": "Real-time Israeli emergency alerts in VS Code",
-  "version": "1.2.5",
+  "version": "1.3.0",
   "publisher": "leon-melamud",
   "author": "Leon Melamud",
   "icon": "Pakar.png",

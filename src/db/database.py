@@ -26,20 +26,20 @@ async def init_db():
     await _db.execute("PRAGMA foreign_keys=ON")
     await _db.executescript("""
         CREATE TABLE IF NOT EXISTS alerts (
-            id TEXT NOT NULL,
+            id TEXT PRIMARY KEY,
             title TEXT,
             category TEXT,
             description TEXT,
             data_json TEXT,
             raw_json TEXT,
-            timestamp TEXT NOT NULL,
-            PRIMARY KEY (id, timestamp)
+            timestamp TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS city_alerts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             alert_id TEXT NOT NULL,
             city TEXT NOT NULL,
-            timestamp TEXT NOT NULL
+            timestamp TEXT NOT NULL,
+            UNIQUE(alert_id, city)
         );
         CREATE INDEX IF NOT EXISTS idx_city_alerts_city ON city_alerts(city);
         CREATE INDEX IF NOT EXISTS idx_city_alerts_timestamp ON city_alerts(timestamp);
@@ -84,7 +84,7 @@ async def save_alert(alert: Dict[str, Any]):
 
     for city in cities:
         await _db.execute(
-            "INSERT INTO city_alerts (alert_id, city, timestamp) VALUES (?, ?, ?)",
+            "INSERT OR IGNORE INTO city_alerts (alert_id, city, timestamp) VALUES (?, ?, ?)",
             (alert.get("id"), city, timestamp),
         )
 
@@ -117,8 +117,8 @@ async def get_alerts_by_city(city: str, limit: int = 50) -> List[Dict[str, Any]]
     limit = min(limit, 100)
     cursor = await _db.execute(
         "SELECT a.id, a.title, a.category, a.description, a.data_json, a.raw_json, a.timestamp "
-        "FROM city_alerts ca JOIN alerts a ON ca.alert_id = a.id AND ca.timestamp = a.timestamp "
-        "WHERE ca.city = ? ORDER BY ca.timestamp DESC LIMIT ?",
+        "FROM city_alerts ca JOIN alerts a ON ca.alert_id = a.id "
+        "WHERE ca.city = ? ORDER BY a.timestamp DESC LIMIT ?",
         (city, limit),
     )
     rows = await cursor.fetchall()
