@@ -62,7 +62,23 @@ skills/              — OpenClaw skill definition
 
 ## How to Run
 
-### Local Development
+### Docker (Recommended)
+
+> **Important**: The Pikud HaOref API (oref.org.il) **geo-blocks non-Israeli IPs**. You must run Docker on a machine with an Israeli IP address (local machine in Israel, or a GCP `me-west1` VM).
+
+```bash
+make deploy  # One-command: creates .env, builds, starts, health-checks all 3 services
+make build   # Build containers
+make up      # Start all 3 services
+make down    # Stop
+make logs    # View logs
+make status  # Show container status
+```
+
+SQLite DB is shared between `alert-poller` and `mcp-tools` via the `poha-alert-data` named volume.
+All services read config from `.env` (auto-created from `.env.example` by `make deploy`).
+
+### Local Development (without Docker)
 
 ```bash
 # Install dependencies
@@ -78,20 +94,6 @@ python -m src.core.mcp_server
 uvicorn src.api.sse_gateway:app --host 0.0.0.0 --port 8002
 ```
 
-### Docker
-
-```bash
-make deploy  # One-command: creates .env, builds, starts, health-checks all 3 services
-make build   # Build containers
-make up      # Start all 3 services
-make down    # Stop
-make logs    # View logs
-make status  # Show container status
-```
-
-SQLite DB is shared between `alert-poller` and `mcp-tools` via the `poha-alert-data` named volume.
-All services read config from `.env` (auto-created from `.env.example` by `make deploy`).
-
 ### Test Alerts
 
 ```bash
@@ -106,6 +108,42 @@ curl -X POST http://localhost:8000/api/test/fake-alert \
   -d '{"data": ["תל אביב"], "cat": "1", "language": "he"}'
 ```
 
+### Connect — MCP Client (VS Code, Claude Desktop, etc.)
+
+Add to your MCP config (e.g. VS Code `mcp.json` or `claude_desktop_config.json`):
+
+```jsonc
+{
+  "servers": {
+    "pikud-haoref": {
+      "type": "http",
+      "url": "http://localhost:8001/mcp"
+    }
+  }
+}
+```
+
+This gives your LLM access to tools: `check_current_alerts`, `get_alert_history`, `get_connection_status`, `get_city_alerts`, `get_db_stats`.
+
+### Connect — REST API
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# SSE stream (real-time, requires API key)
+curl -N -H "X-API-Key: dev-secret-key" http://localhost:8000/api/alerts-stream
+
+# Swagger UI
+open http://localhost:8000/docs
+```
+
+### Connect — VS Code Extension
+
+In VS Code extension settings, set the server URL to:
+- **SSE URL**: `http://localhost:8002/api/alerts-stream`
+- **API URL**: `http://localhost:8000`
+
 ## How to Test
 
 ```bash
@@ -114,13 +152,52 @@ pytest -v
 
 Tests use `src.`-prefixed imports. The `conftest.py` mocks the background poller and DB init to prevent side effects.
 
-## How to Deploy (Railway)
+## Production Deployment (GCP me-west1)
 
-1. Push to GitHub
-2. Connect repo to Railway
-3. Set environment variables: `API_KEY`, `DATABASE_PATH`, `PORT`
-4. Railway uses `railway.toml` for build config and health checks
-5. The `/health` endpoint returns `{"status": "ok"}`
+The oref.org.il API geo-blocks non-Israeli IPs. For production, deploy all 3 services on a **GCP e2-micro VM in `me-west1` (Tel Aviv)** — this is free-tier eligible and provides an Israeli IP.
+
+### Setup
+
+```bash
+# 1. Create free VM in Tel Aviv
+gcloud compute instances create pikud-haoref \
+  --zone=me-west1-a \
+  --machine-type=e2-micro \
+  --image-family=debian-12 \
+  --image-project=debian-cloud \
+  --tags=http-server
+
+# 2. Allow ports 8000-8002
+gcloud compute firewall-rules create allow-pikud-haoref \
+  --allow=tcp:8000-8002 --target-tags=http-server
+
+# 3. SSH and install Docker
+gcloud compute ssh pikud-haoref --zone=me-west1-a
+sudo apt update && sudo apt install -y docker.io docker-compose
+sudo usermod -aG docker $USER && newgrp docker
+
+# 4. Clone, configure, and deploy
+git clone <repo-url> && cd pikud-a-oref-mcp
+cp .env.example .env  # Edit API_KEY for production!
+make deploy
+```
+
+### GCP Service URLs
+
+Replace `<GCP_VM_IP>` with your VM's external IP:
+
+| Service | URL | Health Check |
+|---|---|---|
+| Alert Poller (REST + SSE) | `http://<GCP_VM_IP>:8000` | `/health` |
+| MCP Tools | `http://<GCP_VM_IP>:8001/mcp` | `/health` |
+| SSE Relay (VS Code) | `http://<GCP_VM_IP>:8002/api/alerts-stream` | `/health` |
+
+### Why GCP me-west1?
+
+- **Free forever** (e2-micro is always-free tier)
+- **Israeli IP** from Tel Aviv data center — oref.org.il won't block it
+- **Low latency** to oref.org.il (same country)
+- **Docker works out of the box** on Debian
 
 ## Conventions
 

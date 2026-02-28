@@ -1,4 +1,4 @@
-# SSE Relay Gateway - Dockerfile for Railway / standalone deployment
+# SSE Relay Gateway - Dockerfile for Docker / standalone deployment
 FROM python:3.11-slim
 
 WORKDIR /app

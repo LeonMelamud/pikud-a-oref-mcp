@@ -41,87 +41,66 @@ The **FastAPI service** polls the official Pikud Haoref API at `https://www.oref
 
 ## Quick Start
 
-### Option 1: FastAPI Service (Requires API Key)
+> **Important**: The Pikud HaOref API (oref.org.il) **geo-blocks non-Israeli IPs**. You must run the services on a machine with an Israeli IP — either locally in Israel or on a GCP `me-west1` (Tel Aviv) VM.
 
-1. **Install dependencies:**
+### 1. Deploy with Docker (Recommended)
+
 ```bash
-pip install -r requirements.txt
+# Clone and deploy (one command)
+git clone <repo-url> && cd pikud-a-oref-mcp
+make deploy   # Creates .env, builds 3 containers, starts, health-checks
+
+# Manage services
+make logs     # View logs from all services
+make status   # Show container status
+make down     # Stop all services
+make restart  # Rebuild and restart
 ```
 
-2. **Configure environment** (create `.env` file):
-```env
-API_KEY=your-secure-api-key-here  # Required for FastAPI SSE endpoints
-GEOIP_DB_PATH=/path/to/GeoLite2-Country.mmdb  # Optional for geo-restriction
-```
+After startup, services are available at:
+- **FastAPI + Swagger UI**: http://localhost:8000/docs
+- **MCP Server**: http://localhost:8001/mcp
+- **SSE Gateway**: http://localhost:8002/api/alerts-stream
 
-3. **Run the service:**
-```bash
-# Start all 3 services with Docker (API:8000, MCP:8001, SSE:8002)
-make up
+### 2. Configure your MCP client
 
-# View logs in real-time
-make logs
+Add to VS Code `mcp.json`, Claude Desktop config, or Cursor config:
 
-# Check status
-make status
-```
-
-4. **Connect to the stream:**
-```bash
-curl -H "X-API-Key: your-key" http://localhost:8000/api/alerts-stream
-```
-
-### Option 2: MCP Server (No API Key Required)
-
-1. **Install dependencies:**
-```bash
-pip install -r requirements.txt
-```
-
-2. **Configure your MCP client** (Claude Desktop, etc.):
-
-For **Claude Desktop**, add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
-  "mcpServers": {
-    "poha-alerts": {
+  "servers": {
+    "pikud-haoref": {
       "type": "http",
-      "url": "http://127.0.0.1:8001/mcp"
+      "url": "http://localhost:8001/mcp"
     }
   }
 }
 ```
 
-**Cursor IDE**, add to `.cursor/mcp.json` in your project:
-```json
-{
-  "mcpServers": {
-    "poha-alerts": {
-      "type": "http", 
-      "url": "http://127.0.0.1:8001/mcp"
-    }
-  }
-}
-```
+### 3. Test alerts
 
-3. **Start the services:**
 ```bash
-# Start all 3 services (FastAPI:8000 + MCP:8001 + SSE Gateway:8002)
-make up
-
-# Alternative: Individual service management
-make app-restart    # Restart just FastAPI
-make mcp-restart    # Restart just MCP server  
-make logs-app       # View FastAPI logs only
-make logs-mcp       # View MCP server logs only
+make test-alert       # Hebrew missile alert (תל אביב, רמת גן)
+make test-alert-en    # English earthquake alert (Jerusalem, Haifa)
+make test-alert-drill # Drill alert (כל הארץ)
 ```
 
-**Access URLs after startup:**
-- FastAPI + Swagger UI: http://localhost:8000/docs
-- MCP Server: http://localhost:8001/mcp  
-- SSE Gateway: http://localhost:8002
+### 4. Connect to SSE stream
 
-4. **Start using** - The server will be available as "Pikud Haoref Alert System" in your MCP client via HTTP transport.
+```bash
+curl -N -H "X-API-Key: dev-secret-key" http://localhost:8000/api/alerts-stream
+```
+
+### Local Development (without Docker)
+
+```bash
+pip install -r requirements.txt
+
+# Start services individually (3 separate terminals)
+uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload  # Terminal 1
+python -m src.core.mcp_server                                   # Terminal 2
+uvicorn src.api.sse_gateway:app --host 0.0.0.0 --port 8002      # Terminal 3
+```
 
 ## API Endpoints (FastAPI Service)
 
@@ -256,26 +235,9 @@ poha-real-time-alert-system/
 # Run tests in Docker
 make test
 
-# Or run tests locally (requires Python setup)
-pytest
-pytest tests/test_api.py -v
-pytest --cov=. tests/
+# Or run tests locally
+pytest -v
 ```
-
-### Local Development (Alternative to Docker)
-If you prefer to develop without Docker:
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Start services individually (3 separate terminals)
-python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload  # Terminal 1
-python -m src.core.mcp_server                                            # Terminal 2  
-python -m uvicorn src.api.sse_gateway:app --host 0.0.0.0 --port 8002     # Terminal 3
-```
-
-**Recommended:** Use Docker with `make up` for easier development.
 
 ### Dependencies
 - **Core:** `fastapi`, `uvicorn`, `httpx`, `python-dotenv`
@@ -286,49 +248,71 @@ python -m uvicorn src.api.sse_gateway:app --host 0.0.0.0 --port 8002     # Termi
 ## Docker Deployment
 
 ### Services Overview
-The system runs **3 Docker containers** with the following ports:
+The system runs **3 Docker containers**:
 
 | Service | Container | Port | Description |
 |---------|-----------|------|-------------|
-| **FastAPI** | `poha-app` | `8000` | Main API service, alert polling, SSE webhooks |
-| **MCP Server** | `poha-mcp-server` | `8001` | Model Context Protocol server for AI assistants |
-| **SSE Gateway** | `poha-sse-gateway` | `8002` | SSE gateway for VSCode extension |
+| **Alert Poller** | `poha-alert-poller` | `8000` | Main API: polling, SSE streaming, REST endpoints, test alerts |
+| **MCP Server** | `poha-mcp-tools` | `8001` | MCP tools for LLMs (fastmcp, streamable-http) |
+| **SSE Gateway** | `poha-sse-relay` | `8002` | SSE relay for VS Code extension |
 
-**Access URLs:**
-- **FastAPI Swagger**: http://localhost:8000/docs
-- **MCP Endpoint**: http://localhost:8001/mcp
-- **SSE Gateway**: http://localhost:8002
-
-### Quick Start with Make
+### Docker Commands
 ```bash
-# Start all 3 services (FastAPI + MCP + SSE Gateway)
-make up
-
-# View logs from all services
-make logs
-
-# Check status and ports
-make status
-
-# Stop all services
-make down
-
-# Restart with rebuild
-make restart
+make deploy     # One-command deploy (build + start + health-check)
+make up         # Start all 3 services
+make down       # Stop all services
+make restart    # Rebuild and restart
+make logs       # View all logs
+make status     # Show container status
+make clean      # Remove containers and volumes
 ```
 
-### Manual Docker Commands (Alternative)
-```bash
-# Build and run with docker-compose (all 3 services)
-cd docker
-docker-compose up -d
+## Production Deployment (GCP me-west1)
 
-# Or individual containers
-docker build -f docker/Dockerfile -t poha-api .
-docker build -f docker/mcp.Dockerfile -t poha-mcp .
-docker run -d -p 8000:8000 -e API_KEY=your-key poha-api
-docker run -d -p 8001:8001 -e API_KEY=your-key poha-mcp
+The oref.org.il API **geo-blocks non-Israeli IPs**. For production, deploy on a **GCP e2-micro VM in `me-west1` (Tel Aviv)** — free-tier eligible with an Israeli IP.
+
+### Setup
+
+```bash
+# 1. Create free VM in Tel Aviv
+gcloud compute instances create pikud-haoref \
+  --zone=me-west1-a \
+  --machine-type=e2-micro \
+  --image-family=debian-12 \
+  --image-project=debian-cloud \
+  --tags=http-server
+
+# 2. Allow ports 8000-8002
+gcloud compute firewall-rules create allow-pikud-haoref \
+  --allow=tcp:8000-8002 --target-tags=http-server
+
+# 3. SSH and install Docker
+gcloud compute ssh pikud-haoref --zone=me-west1-a
+sudo apt update && sudo apt install -y docker.io docker-compose
+sudo usermod -aG docker $USER && newgrp docker
+
+# 4. Clone, configure, and deploy
+git clone <repo-url> && cd pikud-a-oref-mcp
+cp .env.example .env  # Edit API_KEY for production!
+make deploy
 ```
+
+### GCP Service URLs
+
+Replace `<GCP_VM_IP>` with your VM's external IP:
+
+| Service | URL |
+|---|---|
+| Alert Poller (REST + SSE) | `http://<GCP_VM_IP>:8000` |
+| MCP Tools | `http://<GCP_VM_IP>:8001/mcp` |
+| SSE Relay (VS Code) | `http://<GCP_VM_IP>:8002/api/alerts-stream` |
+
+### Why GCP me-west1?
+
+- **Free forever** (e2-micro is always-free tier)
+- **Israeli IP** from Tel Aviv data center — oref.org.il won't block it
+- **Low latency** to oref.org.il (same country)
+- **Docker works out of the box** on Debian
 
 ## Data Source
 
@@ -375,17 +359,6 @@ curl "http://localhost:8000/api/alerts/history?city=תל אביב&limit=10"
 curl http://localhost:8000/api/alerts/city/חיפה
 curl http://localhost:8000/api/alerts/stats
 ```
-
-## Railway Deployment
-
-This project is configured for deployment on [Railway](https://railway.app/):
-
-1. Connect your GitHub repo to Railway
-2. Set environment variables: `API_KEY`, `DATABASE_PATH=data/alerts.db`, `PORT`
-3. Railway reads `railway.toml` for build config + health check (`/health`)
-4. The app binds to `$PORT` dynamically (Railway assigns the port)
-
-**Why Railway over Vercel?** SSE requires long-lived persistent connections. Vercel has a 10-60s function timeout which kills SSE streams.
 
 ## OpenClaw Integration
 

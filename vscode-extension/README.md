@@ -2,38 +2,44 @@
 
 Real-time Israeli emergency alerts directly in VS Code via SSE (Server-Sent Events).
 
+Connects to the local Docker-deployed alert system — works out of the box with zero configuration.
+
 ## Features
 
-- 📡 **Real-time SSE Connection** to your Pikud Haoref alert stream
+- 📡 **Real-time SSE Connection** to Pikud HaOref alert stream (Docker)
 - 🚨 **Live Alert Display** in VS Code Explorer sidebar
-- 🔔 **Visual Notifications** for new emergency alerts
+- 🔔 **Desktop Notifications** for new emergency alerts
 - 🧪 **Test Alert Creation** directly from VS Code
 - ⚙️ **Configurable Settings** for API endpoint and authentication
 - 📊 **Connection Status** monitoring
 
-## Installation & Setup
+## Quick Install
 
-### 1. Install Dependencies
 ```bash
-cd vscode-extension
-npm install
+cd vscode-extension && npm install && npm run compile
+npx @vscode/vsce package --allow-missing-repository
+code --install-extension pikud-haoref-alerts-1.2.0.vsix --force
 ```
 
-### 2. Compile TypeScript
-```bash
-npm run compile
-```
+That's it — the extension connects to the production servers by default.
 
-### 3. Test the Extension
-- Press `F5` in VS Code to open Extension Development Host
-- Or use `Ctrl+Shift+P` → "Developer: Reload Window"
+## Default Settings
 
-### 4. Configure Settings
-Go to VS Code Settings and search for "Pikud Haoref":
+| Setting | Default |
+|---|---|
+| **SSE URL** | `http://localhost:8002/api/alerts-stream` |
+| **Server URL** | `http://localhost:8000` |
+| **Notifications** | Enabled |
 
-- **API URL**: `http://localhost:8000/api/alerts-stream`
-- **API Key**: `poha-test-key-2024-secure`
-- **Enable Notifications**: `true`
+To override, go to VS Code Settings → search "Pikud Haoref".
+
+## Live Services
+
+| Service | URL |
+|---|---|
+| Alert API + SSE | `http://localhost:8000` |
+| MCP Server | `http://localhost:8001/mcp` |
+| SSE Relay | `http://localhost:8002` |
 
 ## Usage
 
@@ -74,12 +80,12 @@ vscode-extension/
 
 The extension uses the Node.js `eventsource` library to:
 
-1. **Connect** to `http://localhost:8000/api/alerts-stream`
-2. **Authenticate** using `X-API-Key` header
-3. **Listen** for real-time alert events
-4. **Parse** incoming JSON alert data
-5. **Display** alerts in VS Code UI
-6. **Notify** user of new emergencies
+1. **Connect** to the SSE Relay (`http://localhost:8002/api/alerts-stream`)
+2. **Listen** for real-time alert events (no auth required for SSE relay)
+3. **Parse** incoming JSON alert data
+4. **Display** alerts in VS Code sidebar tree view
+5. **Notify** user via desktop notifications
+6. **Auto-reconnect** with exponential backoff (2s → 60s cap)
 
 ## Development
 
@@ -117,9 +123,34 @@ This creates a `.vsix` file you can install manually or publish to the marketpla
 ## Architecture
 
 ```
-VS Code Extension ← SSE ← FastAPI ← Pikud Haoref API
-     ↓
-  Tree View + Notifications
+Pikud HaOref API (oref.org.il)
+        │
+        ▼ polls every 2s
+   Alert Poller (Docker)
+        │
+        ▼ SSE
+   SSE Relay (Docker)
+        │
+        ▼ EventSource
+   VS Code Extension
+        │
+        ▼
+   Tree View + Desktop Notifications
 ```
 
-The extension bridges real-time SSE streams with VS Code's extension API, providing emergency alerts directly in your development environment.
+## MCP Integration
+
+Add to your VS Code `mcp.json` for LLM access to alert tools:
+
+```jsonc
+{
+  "servers": {
+    "pikud-haoref": {
+      "type": "http",
+      "url": "http://localhost:8001/mcp"
+    }
+  }
+}
+```
+
+This gives your AI assistant tools: `check_current_alerts`, `get_alert_history`, `get_connection_status`, `get_alerts_by_city`, `get_alert_stats`.

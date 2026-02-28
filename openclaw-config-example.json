@@ -1,8 +1,12 @@
 {
   "mcpServers": {
-    "pikud-haoref": {
+    "pikud-haoref-local": {
       "url": "http://127.0.0.1:8001/mcp",
-      "_comment": "For Railway deployment, replace with: https://<your-railway-domain>/mcp"
+      "_comment": "Local development MCP server"
+    },
+    "pikud-haoref": {
+      "url": "http://localhost:8001/mcp",
+      "_comment": "Docker MCP server — provides tools: check_current_alerts, get_alert_history, get_connection_status, get_alerts_by_city, get_alert_stats"
     }
   }
 }

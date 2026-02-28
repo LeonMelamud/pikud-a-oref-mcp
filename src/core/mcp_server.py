@@ -208,10 +208,9 @@ async def get_alert_history(limit: int = 10, region: Optional[str] = None, citie
             all_alerts = cached_all_alerts
         else:
             logger.info("🔗 Cache expired or not present. Fetching alert history from API.")
-            # The history API does not require special headers.
             logger.info(f"🔗 Making request to: {POHA_HISTORY_API_URL}")
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(POHA_HISTORY_API_URL) # No headers needed
+                response = await client.get(POHA_HISTORY_API_URL, headers=REQUEST_HEADERS)
                 
                 # Log response details for debugging
                 logger.info(f"📊 Response status: {response.status_code}")

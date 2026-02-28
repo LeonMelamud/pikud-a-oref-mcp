@@ -16,6 +16,7 @@ REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 }
 POLL_INTERVAL_SECONDS = 2
+POLL_BACKOFF_ON_403 = 30  # Wait 30s before retrying after a 403
 
 def get_alert_type_by_category(category: int) -> str:
     """Maps an alert category ID to its type."""
@@ -94,6 +95,12 @@ async def poll_for_alerts():
                     await alert_queue.put(structured_alert)
                     await save_alert(structured_alert)
 
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 403:
+                    logger.warning(f"403 Forbidden from oref.org.il — likely geo-blocked (non-Israeli IP). Retrying in {POLL_BACKOFF_ON_403}s.")
+                    await asyncio.sleep(POLL_BACKOFF_ON_403)
+                    continue
+                logger.error(f"HTTP error from oref API: {e}")
             except httpx.RequestError as e:
                 logger.error(f"A network error occurred while requesting alerts: {e}")
             except Exception as e:

@@ -27,6 +27,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
+      - PORT=${MCP_PORT:-8001}
       - WEBHOOK_URL=http://alert-poller:${PORT:-8000}/api/webhook/alerts
       - DATABASE_PATH=/app/data/alerts.db
     volumes:
@@ -47,13 +48,14 @@ services:
   sse-relay:
     build:
       context: ..
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/sse.Dockerfile
     ports:
       - "${SSE_PORT:-8002}:${SSE_PORT:-8002}"
     env_file: ../.env
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
+      - PORT=${SSE_PORT:-8002}
       - WEBHOOK_URL=http://alert-poller:${PORT:-8000}/api/alerts-stream
     container_name: poha-sse-relay
     restart: unless-stopped
