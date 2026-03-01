@@ -553,72 +553,40 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
         vscode.window.showInformationMessage('🔴 Disconnected from alert stream');
     }
 
-    /** Fetch recent alert history from the REST API and populate the tree */
+    /** Fetch recent alert history from the REST API and populate the tree.
+     *  Always fetches ALL history — the tree-view filter (matchesAreaFilter) handles display filtering.
+     *  Also pre-loads the knownCities map from /api/cities for reliable ID↔name mapping. */
     private async fetchAlertHistory() {
         const config = vscode.workspace.getConfiguration('pikudHaoref');
         const apiKey = config.get<string>('apiKey', 'poha-test-key-2024-secure');
         const serverUrl = config.get<string>('serverUrl', 'http://localhost:8000');
-        const filterIds = config.get<number[]>('filterAreas', []);
+        const base = serverUrl.replace(/\/+$/, '');
 
         try {
-            // If we have area filter, fetch history per filtered city
-            // Otherwise fetch all recent history
-            let allRows: any[] = [];
-            if (filterIds.length > 0) {
-                // Resolve city names from known cities map
-                const cityNames = filterIds
-                    .map(id => this.knownCities.get(id))
-                    .filter((n): n is string => !!n);
-
-                // If we don't have city names yet, also fetch all cities from API
-                if (cityNames.length === 0) {
-                    try {
-                        const citiesUrl = `${serverUrl.replace(/\/+$/, '')}/api/cities`;
-                        const citiesResp = await fetch(citiesUrl, { headers: { 'X-API-Key': apiKey } });
-                        if (citiesResp.ok) {
-                            const citiesBody = await citiesResp.json() as { cities: { id: number; name: string }[] };
-                            for (const c of citiesBody.cities || []) {
-                                this.knownCities.set(c.id, c.name);
-                            }
-                            for (const id of filterIds) {
-                                const name = this.knownCities.get(id);
-                                if (name) { cityNames.push(name); }
-                            }
-                        }
-                    } catch { /* continue with what we have */ }
-                }
-
-                // Fetch history for each filtered city
-                for (const cityName of cityNames) {
-                    const url = `${serverUrl.replace(/\/+$/, '')}/api/alerts/history?city=${encodeURIComponent(cityName)}&limit=20`;
-                    const response = await fetch(url, { headers: { 'X-API-Key': apiKey } });
-                    if (response.ok) {
-                        const body = await response.json() as { alerts: any[]; count: number };
-                        if (body.alerts) { allRows.push(...body.alerts); }
+            // Pre-load city ID↔name map so filter display and matching work correctly
+            try {
+                const citiesResp = await fetch(`${base}/api/cities`, { headers: { 'X-API-Key': apiKey } });
+                if (citiesResp.ok) {
+                    const citiesBody = await citiesResp.json() as { cities: { id: number; name: string }[] };
+                    for (const c of citiesBody.cities || []) {
+                        this.knownCities.set(c.id, c.name);
                     }
                 }
+            } catch { /* non-fatal — continue without city map */ }
 
-                // Deduplicate by alert ID
-                const seen = new Set<string>();
-                allRows = allRows.filter(r => {
-                    if (seen.has(r.id)) { return false; }
-                    seen.add(r.id);
-                    return true;
-                });
-            } else {
-                const url = `${serverUrl.replace(/\/+$/, '')}/api/alerts/history?limit=50`;
-                const response = await fetch(url, { headers: { 'X-API-Key': apiKey } });
-                if (response.ok) {
-                    const body = await response.json() as { alerts: any[]; count: number };
-                    allRows = body.alerts || [];
-                }
+            // Always fetch all recent history; tree-level matchesAreaFilter handles display filtering
+            const url = `${base}/api/alerts/history?limit=50`;
+            const response = await fetch(url, { headers: { 'X-API-Key': apiKey } });
+            if (!response.ok) {
+                console.error(`History fetch failed: HTTP ${response.status}`);
+                return;
             }
-
-            if (allRows.length === 0) { return; }
+            const body = await response.json() as { alerts: any[]; count: number };
+            if (!body.alerts || body.alerts.length === 0) { return; }
 
             // Convert DB rows → Alert objects (avoid duplicating IDs already shown)
             const existingIds = new Set(this.alerts.map(a => a.id));
-            for (const row of allRows) {
+            for (const row of body.alerts) {
                 if (existingIds.has(row.id)) { continue; }
                 const cities = row.data || [];
                 const cityIds = row.city_ids || [];
@@ -640,7 +608,7 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
                 this.alerts = this.alerts.slice(0, 50);
             }
             this.refresh();
-            console.log(`Loaded ${allRows.length} historical alerts from DB`);
+            console.log(`Loaded ${body.alerts.length} historical alerts from DB`);
         } catch (err: any) {
             console.error('Failed to fetch alert history:', err.message);
         }
