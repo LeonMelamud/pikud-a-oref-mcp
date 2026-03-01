@@ -53,6 +53,11 @@
         "category": "Pikud Haoref"
       },
       {
+        "command": "pikudHaoref.selectAllClearSound",
+        "title": "Select All Clear Sound",
+        "category": "Pikud Haoref"
+      },
+      {
         "command": "pikudHaoref.selectFilterAreas",
         "title": "Select Alert Areas Filter",
         "category": "Pikud Haoref"
@@ -133,7 +138,12 @@
         "pikudHaoref.alertSound": {
           "type": "string",
           "default": "worms.mp3",
-          "description": "MP3 file to play on alert. Place .mp3 files in the extension's sounds/ folder. Use 'Pikud Haoref: Select Alert Sound' command to pick from available sounds."
+          "description": "MP3 file to play on emergency alerts. Place .mp3 files in the extension's sounds/ folder."
+        },
+        "pikudHaoref.allClearSound": {
+          "type": "string",
+          "default": "relax.mp3",
+          "description": "MP3 file to play on All Clear / Safe to Exit alerts. Place .mp3 files in the extension's sounds/ folder."
         },
         "pikudHaoref.filterAreas": {
           "type": "array",

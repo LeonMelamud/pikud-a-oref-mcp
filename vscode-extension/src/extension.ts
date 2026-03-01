@@ -97,7 +97,7 @@ function playSound(filePath: string): void {
 }
 
 /** Tree item types to distinguish children in getChildren() */
-type TreeNodeKind = 'status' | 'empty' | 'alert' | 'section' | 'city' | 'detail' | 'controls' | 'soundToggle' | 'soundPicker' | 'filterHeader' | 'filterArea';
+type TreeNodeKind = 'status' | 'empty' | 'alert' | 'section' | 'city' | 'detail' | 'controls' | 'soundToggle' | 'soundPicker' | 'allClearSoundPicker' | 'filterHeader' | 'filterArea';
 
 class AlertItem extends vscode.TreeItem {
     alert?: Alert;
@@ -253,18 +253,32 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
             soundToggle.tooltip = 'Click to toggle alert sound on/off';
             children.push(soundToggle);
 
-            // Sound picker
+            // Alert sound picker
             const soundPicker = new AlertItem(
-                '🎵 Change Sound',
+                '🎵 Alert Sound',
                 vscode.TreeItemCollapsibleState.None
             );
             soundPicker.kind = 'soundPicker';
             soundPicker.id = 'ctrl-sound-picker';
             soundPicker.description = alertSoundFile;
             soundPicker.contextValue = 'soundPicker';
-            soundPicker.command = { command: 'pikudHaoref.selectAlertSound', title: 'Select Sound' };
+            soundPicker.command = { command: 'pikudHaoref.selectAlertSound', title: 'Select Alert Sound' };
             soundPicker.tooltip = 'Click to choose alert sound file';
             children.push(soundPicker);
+
+            // All Clear sound picker
+            const allClearSoundFile = config.get<string>('allClearSound', 'relax.mp3');
+            const allClearPicker = new AlertItem(
+                '🎵 All Clear Sound',
+                vscode.TreeItemCollapsibleState.None
+            );
+            allClearPicker.kind = 'allClearSoundPicker';
+            allClearPicker.id = 'ctrl-allclear-sound-picker';
+            allClearPicker.description = allClearSoundFile;
+            allClearPicker.contextValue = 'allClearSoundPicker';
+            allClearPicker.command = { command: 'pikudHaoref.selectAllClearSound', title: 'Select All Clear Sound' };
+            allClearPicker.tooltip = 'Click to choose the sound for All Clear / Safe to Exit alerts';
+            children.push(allClearPicker);
 
             // Filter header
             const filterIds = config.get<number[]>('filterAreas', []);
@@ -365,10 +379,8 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
                 this.refresh();
                 vscode.window.showInformationMessage('🟢 Connected to Pikud Haoref alert stream');
 
-                // Load recent history from DB on first connect
-                if (this.alerts.length === 0) {
-                    this.fetchAlertHistory();
-                }
+                // Load recent history from DB on connect
+                this.fetchAlertHistory();
             };
 
             this.eventSource.onmessage = (event: any) => {
@@ -429,15 +441,20 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
                         });
                     }
 
-                    // Play alert sound if enabled and area matches
+                    // Play sound if enabled and area matches
                     if (alertMatchesFilter) {
                         const soundConfig = vscode.workspace.getConfiguration('pikudHaoref');
                         const enableSound = soundConfig.get<boolean>('enableSound', true);
-                        const alertSoundFile = soundConfig.get<string>('alertSound', 'worms.mp3');
-                        if (enableSound && alertSoundFile && this.extensionPath) {
-                            const soundPath = path.join(getSoundsDir(this.extensionPath), alertSoundFile);
-                            if (fs.existsSync(soundPath)) {
-                                playSound(soundPath);
+                        if (enableSound && this.extensionPath) {
+                            // Use different sound for All Clear vs regular alerts
+                            const soundFile = alert.type === 'allClear'
+                                ? soundConfig.get<string>('allClearSound', 'relax.mp3')
+                                : soundConfig.get<string>('alertSound', 'worms.mp3');
+                            if (soundFile) {
+                                const soundPath = path.join(getSoundsDir(this.extensionPath), soundFile);
+                                if (fs.existsSync(soundPath)) {
+                                    playSound(soundPath);
+                                }
                             }
                         }
                     }
@@ -541,24 +558,67 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
         const config = vscode.workspace.getConfiguration('pikudHaoref');
         const apiKey = config.get<string>('apiKey', 'poha-test-key-2024-secure');
         const serverUrl = config.get<string>('serverUrl', 'http://localhost:8000');
+        const filterIds = config.get<number[]>('filterAreas', []);
 
         try {
-            const url = `${serverUrl.replace(/\/+$/, '')}/api/alerts/history?limit=20`;
-            const response = await fetch(url, {
-                headers: { 'X-API-Key': apiKey },
-            });
-            if (!response.ok) {
-                console.error(`History fetch failed: HTTP ${response.status}`);
-                return;
+            // If we have area filter, fetch history per filtered city
+            // Otherwise fetch all recent history
+            let allRows: any[] = [];
+            if (filterIds.length > 0) {
+                // Resolve city names from known cities map
+                const cityNames = filterIds
+                    .map(id => this.knownCities.get(id))
+                    .filter((n): n is string => !!n);
+
+                // If we don't have city names yet, also fetch all cities from API
+                if (cityNames.length === 0) {
+                    try {
+                        const citiesUrl = `${serverUrl.replace(/\/+$/, '')}/api/cities`;
+                        const citiesResp = await fetch(citiesUrl, { headers: { 'X-API-Key': apiKey } });
+                        if (citiesResp.ok) {
+                            const citiesBody = await citiesResp.json() as { cities: { id: number; name: string }[] };
+                            for (const c of citiesBody.cities || []) {
+                                this.knownCities.set(c.id, c.name);
+                            }
+                            for (const id of filterIds) {
+                                const name = this.knownCities.get(id);
+                                if (name) { cityNames.push(name); }
+                            }
+                        }
+                    } catch { /* continue with what we have */ }
+                }
+
+                // Fetch history for each filtered city
+                for (const cityName of cityNames) {
+                    const url = `${serverUrl.replace(/\/+$/, '')}/api/alerts/history?city=${encodeURIComponent(cityName)}&limit=20`;
+                    const response = await fetch(url, { headers: { 'X-API-Key': apiKey } });
+                    if (response.ok) {
+                        const body = await response.json() as { alerts: any[]; count: number };
+                        if (body.alerts) { allRows.push(...body.alerts); }
+                    }
+                }
+
+                // Deduplicate by alert ID
+                const seen = new Set<string>();
+                allRows = allRows.filter(r => {
+                    if (seen.has(r.id)) { return false; }
+                    seen.add(r.id);
+                    return true;
+                });
+            } else {
+                const url = `${serverUrl.replace(/\/+$/, '')}/api/alerts/history?limit=50`;
+                const response = await fetch(url, { headers: { 'X-API-Key': apiKey } });
+                if (response.ok) {
+                    const body = await response.json() as { alerts: any[]; count: number };
+                    allRows = body.alerts || [];
+                }
             }
-            const body = await response.json() as { alerts: any[]; count: number };
-            if (!body.alerts || body.alerts.length === 0) {
-                return;
-            }
+
+            if (allRows.length === 0) { return; }
 
             // Convert DB rows → Alert objects (avoid duplicating IDs already shown)
             const existingIds = new Set(this.alerts.map(a => a.id));
-            for (const row of body.alerts) {
+            for (const row of allRows) {
                 if (existingIds.has(row.id)) { continue; }
                 const cities = row.data || [];
                 const cityIds = row.city_ids || [];
@@ -573,11 +633,14 @@ class AlertProvider implements vscode.TreeDataProvider<AlertItem> {
                 });
             }
 
+            // Sort by timestamp descending (most recent first)
+            this.alerts.sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime());
+
             if (this.alerts.length > 50) {
                 this.alerts = this.alerts.slice(0, 50);
             }
             this.refresh();
-            console.log(`Loaded ${body.alerts.length} historical alerts from DB`);
+            console.log(`Loaded ${allRows.length} historical alerts from DB`);
         } catch (err: any) {
             console.error('Failed to fetch alert history:', err.message);
         }
@@ -803,12 +866,41 @@ export function activate(context: vscode.ExtensionContext) {
             }));
             const picked = await vscode.window.showQuickPick(items, {
                 placeHolder: 'Select an alert sound (.mp3)',
-                title: 'Alert Sound'
+                title: '🚨 Alert Sound'
             });
             if (picked) {
                 await config.update('alertSound', picked.file, vscode.ConfigurationTarget.Global);
                 alertProvider.refresh();
+                // Preview the sound
+                const soundPath = path.join(getSoundsDir(context.extensionPath), picked.file);
+                if (fs.existsSync(soundPath)) { playSound(soundPath); }
                 vscode.window.showInformationMessage(`🔊 Alert sound set to: ${picked.file}`);
+            }
+        }),
+        vscode.commands.registerCommand('pikudHaoref.selectAllClearSound', async () => {
+            const sounds = discoverSounds(context.extensionPath);
+            if (sounds.length === 0) {
+                vscode.window.showWarningMessage('No .mp3 files found in the sounds/ folder.');
+                return;
+            }
+            const config = vscode.workspace.getConfiguration('pikudHaoref');
+            const current = config.get<string>('allClearSound', 'relax.mp3');
+            const items = sounds.map(s => ({
+                label: s === current ? `$(check) ${s}` : s,
+                description: s === current ? 'currently selected' : '',
+                file: s
+            }));
+            const picked = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Select a sound for All Clear / Safe to Exit (.mp3)',
+                title: '✅ All Clear Sound'
+            });
+            if (picked) {
+                await config.update('allClearSound', picked.file, vscode.ConfigurationTarget.Global);
+                alertProvider.refresh();
+                // Preview the sound
+                const soundPath = path.join(getSoundsDir(context.extensionPath), picked.file);
+                if (fs.existsSync(soundPath)) { playSound(soundPath); }
+                vscode.window.showInformationMessage(`✅ All Clear sound set to: ${picked.file}`);
             }
         }),
         vscode.commands.registerCommand('pikudHaoref.installExtension', () => {
@@ -832,6 +924,7 @@ export function activate(context: vscode.ExtensionContext) {
             }
             if (e.affectsConfiguration('pikudHaoref.enableSound') ||
                 e.affectsConfiguration('pikudHaoref.alertSound') ||
+                e.affectsConfiguration('pikudHaoref.allClearSound') ||
                 e.affectsConfiguration('pikudHaoref.filterAreas')) {
                 alertProvider.refresh();
             }
